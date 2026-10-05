@@ -28,6 +28,7 @@ export {
   TIER_SHORTHAND,
   tierPrefilter,
   uniqSorted,
+  uniqStrings,
   vocabErrors,
 } from "./vocab.ts";
 

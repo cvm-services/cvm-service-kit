@@ -196,8 +196,35 @@ Deno.test("geohash precisions: two or more of ONE point (P2)", () => {
         { serviceClass: "ev-charger", d: "charger-02", geohashes: ["u33d"] },
         VOCAB,
       ),
-    "exactly one precision",
+    "exactly one distinct precision",
   );
+  // F1 (review round 1): the guard must see the EMITTED tag set, not the input
+  // array -- duplicates collapsing to one `g` tag are the same silent
+  // discovery failure as publishing one precision (P2/D3, #g is exact match).
+  for (
+    const dup of [
+      { label: "duplicate-only", d: "charger-dup-01", geohashes: ["u33d", "u33d"] },
+      { label: "dedupe to one of three", d: "charger-dup-02", geohashes: ["u33d", "u33d", "u33d"] },
+      {
+        label: "duplicates plus a genuine second precision",
+        d: "charger-dup-03",
+        geohashes: ["u33dc0", "u33d", "u33d"],
+      },
+    ]
+  ) {
+    const uniq = new Set(dup.geohashes).size;
+    if (uniq === 1) {
+      assertThrows(
+        () => emitAnnouncementTags({ serviceClass: "ev-charger", ...dup }, VOCAB),
+        "exactly one distinct precision",
+      );
+    } else {
+      const g = emitAnnouncementTags({ serviceClass: "ev-charger", ...dup }, VOCAB)
+        .tags.filter((t) => t[0] === "g").map((t) => t[1]);
+      assertEquals(g.length, uniq, `${dup.label}: one g tag per DISTINCT precision`);
+      assertEquals(g, ["u33d", "u33dc0"], `${dup.label}: short first, no duplicates`);
+    }
+  }
   assertThrows(
     () =>
       emitAnnouncementTags(

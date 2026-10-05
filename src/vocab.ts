@@ -172,6 +172,11 @@ export function uniqSorted(xs: string[]): string[] {
   return [...new Set(xs)].sort();
 }
 
+/** Trim, drop empties, de-duplicate — CASE PRESERVED (a URL's path is not lowercased). */
+export function uniqStrings(xs: string[]): string[] {
+  return [...new Set(xs.map((x) => String(x).trim()).filter(Boolean))];
+}
+
 export interface DeclaredInputs {
   /** `cvm:req:<field>` values, sentinel stripped, sorted, deduped. */
   required: string[];

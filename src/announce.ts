@@ -27,6 +27,7 @@ import {
   type Tier,
   TIER_PREFIX,
   TIER_RANKS,
+  uniqStrings,
   type Vocab,
 } from "./vocab.ts";
 import { assessAnnouncementTags } from "./validate.ts";
@@ -151,15 +152,18 @@ export function emitAnnouncementTags(
   const tier = rec.tier ?? "none";
 
   // --- geohash precisions -------------------------------------------------
-  const geohashes = (input.geohashes ?? []).map((g) => g.trim());
+  // The guard must see the TAGS about to be emitted, not the raw input: `#g` is
+  // exact match, so duplicates collapsing to one `g` tag are the same silent
+  // discovery failure as publishing one precision (P2/D3). Dedupe first.
+  const geohashes = uniqStrings(input.geohashes ?? []);
   if (geohashes.length === 1) {
     throw new Error(
-      "geohashes: exactly one precision given — #g is exact match, publish two or more " +
-        "precisions of the same point (P2), or none if the service has no fixed location",
+      "geohashes: exactly one distinct precision — #g is exact match, publish two or more " +
+        "distinct precisions of the same point (P2), or none if the service has no fixed location",
     );
   }
   if (geohashes.length > 1) {
-    const longest = [...geohashes].sort((a, b) => b.length - a.length)[0];
+    const longest = geohashes.reduce((a, b) => (b.length > a.length ? b : a));
     for (const g of geohashes) {
       if (!g || !/^[0-9b-hjkmnp-z]+$/.test(g)) throw new Error(`geohash '${g}' is not a geohash`);
       if (!longest.startsWith(g)) {
@@ -174,7 +178,7 @@ export function emitAnnouncementTags(
   const tags: string[][] = [];
   tags.push(["d", d]);
   tags.push(["t", CLASS_PREFIX + serviceClass]);
-  for (const w of dedupeLower(input.humanTags ?? [])) {
+  for (const w of uniqStrings(input.humanTags ?? [])) {
     if (w.includes(":")) throw new Error(`human t word '${w}' is namespaced; use the class field`);
     tags.push(["t", w]);
   }
@@ -185,9 +189,7 @@ export function emitAnnouncementTags(
   // recomputed tier is none or financial; never alongside a higher tier.
   if (TIER_RANKS[tier] <= TIER_RANKS.financial) tags.push(["t", NONE_SENTINEL]);
   tags.push(["t", TIER_PREFIX + tier]);
-  for (
-    const g of [...new Set(geohashes)].sort((a, b) => a.length - b.length || a.localeCompare(b))
-  ) {
+  for (const g of geohashes.sort((a, b) => a.length - b.length || a.localeCompare(b))) {
     tags.push(["g", g]);
   }
   for (
@@ -200,7 +202,7 @@ export function emitAnnouncementTags(
     tags.push(["cap", `tool:${tool}`, String(cap.amount), cap.unit ?? "sats"]);
   }
   for (const a of input.registries ?? []) tags.push(["a", a]);
-  for (const r of dedupeLower(input.urls ?? [])) tags.push(["r", r]);
+  for (const r of uniqStrings(input.urls ?? [])) tags.push(["r", r]);
 
   // --- self-check: the emitter can never emit a non-conforming set --------
   const assessment = assessAnnouncementTags(tags, vocab);
@@ -240,8 +242,4 @@ function cleanFields(fields: string[], side: string, warnings: string[]): string
     if (!out.includes(f)) out.push(f);
   }
   return out.sort();
-}
-
-function dedupeLower(xs: string[]): string[] {
-  return [...new Set(xs.map((x) => String(x).trim()).filter(Boolean))];
 }
