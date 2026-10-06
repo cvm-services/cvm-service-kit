@@ -113,7 +113,7 @@
     mode: "0755"
 
 - name: Remove rootfs for a forced rebuild
-  when: cvm_lambda_rootfs_force | default(false)
+  when: cvm_lambda_rootfs_force | default(false) | bool
   ansible.builtin.file:
     path: "{{ cvm_lambda_state_dir }}/firecracker/rootfs.ext4"
     state: absent
