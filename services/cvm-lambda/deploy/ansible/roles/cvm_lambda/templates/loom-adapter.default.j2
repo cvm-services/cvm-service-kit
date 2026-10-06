@@ -1,0 +1,14 @@
+# Managed by Ansible — do not edit by hand.
+# role: cvm_lambda (services/cvm-lambda/deploy/ansible)
+ADAPTER_SOCKET={{ cvm_lambda_socket }}
+FIRECRACKER_BINARY=/usr/local/bin/firecracker
+FC_KERNEL={{ cvm_lambda_state_dir }}/firecracker/vmlinux
+FC_ROOTFS={{ cvm_lambda_state_dir }}/firecracker/rootfs.ext4
+VM_POOL_SIZE={{ adapter_pool_size }}
+FC_CPUS={{ adapter_cpus }}
+FC_MEM_MIB={{ adapter_mem_mib }}
+VM_POOL_MAX_AGE={{ adapter_max_age }}
+VM_POOL_MAX_JOBS={{ adapter_max_jobs }}
+HEALTH_CHECK_INTERVAL=60
+FC_RUNTIME_DIR={{ cvm_lambda_state_dir }}/firecracker/run
+ADAPTER_SOCKET_GROUP={{ cvm_lambda_user }}

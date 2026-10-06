@@ -1,0 +1,20 @@
+[Unit]
+Description=Loom Firecracker Adapter (cvm-lambda executor)
+After=network.target
+ConditionPathExists=/dev/kvm
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/loom-adapter
+# ADAPTER_SOCKET=/run/loom/adapter.sock — systemd owns the runtime dir.
+RuntimeDirectory=loom
+RuntimeDirectoryMode=0755
+ExecStart=/usr/local/bin/loom-adapter-firecracker
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

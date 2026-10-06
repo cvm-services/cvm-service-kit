@@ -1,0 +1,15 @@
+---
+# Provision the cvm-lambda executor (Loom Firecracker adapter) and the ContextVM
+# control plane. Idempotent; safe to re-run.
+#
+#   cd services/cvm-lambda/deploy/ansible
+#   ansible-playbook playbook.yml
+#
+# Pin the server key for reproducibility (otherwise generated once on first run):
+#   ansible-playbook playbook.yml -e cvm_lambda_server_key=$(openssl rand -hex 32)
+- name: cvm-lambda on vps2
+  hosts: executor
+  become: true
+  gather_facts: true
+  roles:
+    - cvm_lambda

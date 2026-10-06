@@ -1,0 +1,8 @@
+node_modules/
+.artifacts/
+*.sqlite
+*.sqlite-*
+.env
+.env.*
+secrets/
+dist/

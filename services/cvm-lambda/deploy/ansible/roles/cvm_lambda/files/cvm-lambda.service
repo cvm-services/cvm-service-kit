@@ -1,0 +1,18 @@
+[Unit]
+Description=cvm-lambda — serverless code execution ContextVM service
+After=network-online.target loom-adapter-firecracker.service
+Wants=loom-adapter-firecracker.service
+
+[Service]
+Type=simple
+User=debian
+WorkingDirectory=/home/debian/cvm-service-kit/services/cvm-lambda
+EnvironmentFile=/etc/cvm-lambda/env
+ExecStart=/home/debian/.bun/bin/bun /home/debian/cvm-service-kit/services/cvm-lambda/src/server.ts
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

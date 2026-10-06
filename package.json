@@ -1,0 +1,21 @@
+{
+  "name": "cvm-service-kit",
+  "version": "0.1.0",
+  "description": "Library for building ContextVM (CVM) services: direct-nostr MCP transport, CEP-6 announcements, CEP-8 payment gating.",
+  "type": "module",
+  "module": "src/index.ts",
+  "main": "src/index.ts",
+  "license": "MIT",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "nostr-tools": "^2.10.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "bun-types": "latest",
+    "typescript": "^5.6.3"
+  }
+}

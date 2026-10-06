@@ -1,0 +1,233 @@
+---
+# cvm-lambda: Firecracker executor (loom adapter) + ContextVM control plane.
+# Idempotent: safe to re-run. Secrets are generated once and never overwritten.
+
+- name: Require KVM
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: cvm_kvm
+- name: Fail without /dev/kvm
+  ansible.builtin.assert:
+    that: cvm_kvm.stat.exists
+    fail_msg: "{{ inventory_hostname }} has no /dev/kvm — Firecracker cannot run here"
+
+- name: Base packages
+  ansible.builtin.apt:
+    name:
+      - debootstrap
+      - e2fsprogs
+      - qemu-utils
+      - curl
+      - ca-certificates
+      - ubuntu-keyring
+      - unzip
+      - xz-utils
+      - openssl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# --- Firecracker binary (version-pinned) -----------------------------------
+- name: Check installed Firecracker version
+  ansible.builtin.command: /usr/local/bin/firecracker --version
+  register: cvm_fc_ver
+  changed_when: false
+  failed_when: false
+
+- name: Install Firecracker {{ firecracker_version }}
+  when: cvm_fc_ver.rc != 0 or firecracker_version not in cvm_fc_ver.stdout
+  block:
+    - name: Download Firecracker release
+      ansible.builtin.get_url:
+        url: "{{ firecracker_url }}"
+        dest: /tmp/firecracker.tgz
+        checksum: "sha256:{{ firecracker_tgz_sha256 }}"
+        mode: "0644"
+    - name: Extract Firecracker release
+      ansible.builtin.unarchive:
+        src: /tmp/firecracker.tgz
+        dest: /tmp
+        remote_src: true
+    - name: Install Firecracker binary
+      ansible.builtin.copy:
+        src: "/tmp/release-{{ firecracker_version }}-x86_64/firecracker-{{ firecracker_version }}-x86_64"
+        dest: /usr/local/bin/firecracker
+        mode: "0755"
+        remote_src: true
+
+# --- State dirs ------------------------------------------------------------
+- name: State directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ cvm_lambda_user }}"
+    group: "{{ cvm_lambda_user }}"
+    mode: "0755"
+  loop:
+    - "{{ cvm_lambda_state_dir }}"
+    - "{{ cvm_lambda_state_dir }}/firecracker"
+    - "{{ cvm_lambda_state_dir }}/cvm-lambda"
+
+# --- Guest kernel (sha256-pinned) ------------------------------------------
+- name: Guest kernel
+  ansible.builtin.get_url:
+    url: "{{ firecracker_kernel_url }}"
+    dest: "{{ cvm_lambda_state_dir }}/firecracker/vmlinux"
+    checksum: "sha256:{{ firecracker_kernel_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: cvm_kernel
+
+# --- Build the pinned adapter binaries on the controller -------------------
+- name: Build adapter artifacts (controller)
+  become: false
+  delegate_to: localhost
+  ansible.builtin.command:
+    cmd: "{{ role_path }}/files/build-artifacts.sh {{ loom_adapter_commit }} {{ cvm_lambda_artifacts_dir }}"
+  register: cvm_artifacts
+  changed_when: "'rebuilt' in cvm_artifacts.stdout"
+
+- name: Install adapter binary
+  ansible.builtin.copy:
+    src: "{{ cvm_lambda_artifacts_dir }}/loom-adapter-firecracker"
+    dest: /usr/local/bin/loom-adapter-firecracker
+    mode: "0755"
+  register: cvm_adapter_bin
+
+- name: Install vsock agent (input to rootfs build)
+  ansible.builtin.copy:
+    src: "{{ cvm_lambda_artifacts_dir }}/loom-vsock-agent"
+    dest: "/home/{{ cvm_lambda_user }}/loom-vsock-agent"
+    owner: "{{ cvm_lambda_user }}"
+    group: "{{ cvm_lambda_user }}"
+    mode: "0755"
+
+# --- Rootfs (built once; heavy) --------------------------------------------
+- name: Install rootfs build script
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/build-rootfs.sh"
+    dest: "/home/{{ cvm_lambda_user }}/build-rootfs.sh"
+    owner: "{{ cvm_lambda_user }}"
+    group: "{{ cvm_lambda_user }}"
+    mode: "0755"
+
+- name: Remove rootfs for a forced rebuild
+  when: cvm_lambda_rootfs_force | default(false)
+  ansible.builtin.file:
+    path: "{{ cvm_lambda_state_dir }}/firecracker/rootfs.ext4"
+    state: absent
+
+- name: Build guest rootfs (Ubuntu 24.04 + go/rustc)
+  ansible.builtin.command:
+    cmd: "/home/{{ cvm_lambda_user }}/build-rootfs.sh {{ cvm_lambda_state_dir }}/firecracker/rootfs.ext4 {{ rootfs_size_gib }}"
+    creates: "{{ cvm_lambda_state_dir }}/firecracker/rootfs.ext4"
+  environment:
+    LOOM_VSOCK_AGENT: "/home/{{ cvm_lambda_user }}/loom-vsock-agent"
+  async: 3600
+  poll: 30
+
+# --- Adapter config + service ----------------------------------------------
+- name: Adapter config
+  ansible.builtin.template:
+    src: loom-adapter.default.j2
+    dest: /etc/default/loom-adapter
+    mode: "0644"
+
+- name: Adapter unit
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/loom-adapter-firecracker.service"
+    dest: /etc/systemd/system/loom-adapter-firecracker.service
+    mode: "0644"
+
+- name: Enable + start adapter
+  ansible.builtin.systemd:
+    name: loom-adapter-firecracker
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Restart adapter after a Firecracker, kernel or adapter-binary change
+  when: >-
+    cvm_fc_ver.rc != 0
+    or firecracker_version not in cvm_fc_ver.stdout
+    or cvm_kernel.changed
+    or cvm_adapter_bin.changed
+  ansible.builtin.systemd:
+    name: loom-adapter-firecracker
+    state: restarted
+
+- name: Wait for adapter socket
+  ansible.builtin.wait_for:
+    path: "{{ cvm_lambda_socket }}"
+    timeout: 90
+
+# --- Control plane code -----------------------------------------------------
+- name: Check bun
+  ansible.builtin.stat:
+    path: "/home/{{ cvm_lambda_user }}/.bun/bin/bun"
+  register: cvm_bun
+
+- name: Install bun
+  when: not cvm_bun.stat.exists
+  ansible.builtin.shell:
+    cmd: "curl -fsSL https://bun.sh/install | bash"
+    creates: "/home/{{ cvm_lambda_user }}/.bun/bin/bun"
+  args:
+    executable: /bin/bash
+
+- name: Sync control-plane source
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../../../../"
+    dest: "{{ cvm_lambda_repo_dir }}/"
+    delete: true
+    rsync_opts:
+      - "--exclude=node_modules"
+      - "--exclude=.git"
+      - "--exclude=.artifacts"
+      - "--exclude=*.sqlite"
+  become: false
+
+- name: Install control-plane deps
+  ansible.builtin.command:
+    cmd: "/home/{{ cvm_lambda_user }}/.bun/bin/bun install"
+    chdir: "{{ cvm_lambda_repo_dir }}"
+  become: false
+  register: cvm_bun_install
+  changed_when: "'packages installed' in cvm_bun_install.stdout"
+
+# --- Control plane config + service ----------------------------------------
+- name: Control-plane config dir
+  ansible.builtin.file:
+    path: /etc/cvm-lambda
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check control-plane env (secret must persist)
+  ansible.builtin.stat:
+    path: /etc/cvm-lambda/env
+  register: cvm_env
+
+- name: Write control-plane env (first run only)
+  when: not cvm_env.stat.exists
+  ansible.builtin.template:
+    src: cvm-lambda.env.j2
+    dest: /etc/cvm-lambda/env
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Control-plane unit
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/cvm-lambda.service"
+    dest: /etc/systemd/system/cvm-lambda.service
+    mode: "0644"
+
+- name: Enable + start control plane
+  ansible.builtin.systemd:
+    name: cvm-lambda
+    enabled: true
+    state: started
+    daemon_reload: true
