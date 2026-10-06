@@ -65,13 +65,26 @@
       cvm-lambda; survives restarts / replay
 - [x] Per-payer rate limiting — `RateLimiter` (token bucket) wired into
       cvm-lambda `run_code`/`submit_job`
-- [ ] Default-deny egress for `loomtap-*` + opt-in network tier
+- [x] Default-deny egress — `loom-egress-deny.service` (nft rule
+      `iifname "loomtap*" drop`) in the executor role; verified a guest cannot
+      reach `1.1.1.1:80` while offline code still runs (4/4 smoke PASS)
+- [ ] Opt-in, metered network tier (flip `cvm_lambda_deny_egress` and gate it)
 - [ ] Admission queue + global concurrency cap
 - [ ] Vault secrets (provider nsec, treasury key); rotation runbook
 - [ ] Observability: health, counters, low-balance alerts, reconciliation
 - [ ] ADR + README + CI evidence
 
 ---
+
+## Known issues
+
+- **Adapter VM recycle is intermittently fragile.** After a job, the pool can
+  recycle and fail with `ioctl(TUNSETIFF): Device or resource busy` +
+  `Failed to recycle VM pool-0: Failed to add vsock`, leaving the pool
+  unhealthy (jobs then report "Pool exhausted" until restart). Mitigation:
+  `systemctl restart loom-adapter-firecracker`. Root cause not yet chased
+  (possible TAP teardown race + max_age recycle). Not caused by egress deny —
+  4 sequential jobs passed after a restart.
 
 ## Open items / decisions
 

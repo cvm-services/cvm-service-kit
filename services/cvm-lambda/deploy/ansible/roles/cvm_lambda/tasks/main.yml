@@ -250,6 +250,30 @@
     name: cvm-lambda
     state: restarted
 
+# --- Egress containment (default-deny for microVM TAPs) --------------------
+- name: Egress-deny unit
+  when: cvm_lambda_deny_egress | bool
+  ansible.builtin.template:
+    src: loom-egress-deny.service.j2
+    dest: /etc/systemd/system/loom-egress-deny.service
+    mode: "0644"
+  register: cvm_egress_unit
+
+- name: Enable egress-deny
+  when: cvm_lambda_deny_egress | bool
+  ansible.builtin.systemd:
+    name: loom-egress-deny
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Disable egress-deny when turned off
+  when: not (cvm_lambda_deny_egress | bool)
+  ansible.builtin.systemd:
+    name: loom-egress-deny
+    enabled: false
+    state: stopped
+
 # --- Guard against locking ourselves out ------------------------------------
 # Repeated SSH to a fail2ban-protected host can ban the operator IP. Whitelist
 # the controller's current public IP (best-effort, runtime allow-list).

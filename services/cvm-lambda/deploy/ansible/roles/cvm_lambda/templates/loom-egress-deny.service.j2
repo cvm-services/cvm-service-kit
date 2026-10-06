@@ -1,0 +1,14 @@
+[Unit]
+Description=Deny egress from loom microVM TAP interfaces (cvm-lambda)
+After=loom-adapter-firecracker.service
+Wants=loom-adapter-firecracker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Match by interface name so the rule also covers TAPs created later.
+ExecStart=/bin/sh -c 'iptables -C FORWARD -i loomtap+ -j DROP 2>/dev/null || iptables -I FORWARD 1 -i loomtap+ -j DROP'
+ExecStop=/bin/sh -c 'iptables -D FORWARD -i loomtap+ -j DROP 2>/dev/null || true'
+
+[Install]
+WantedBy=multi-user.target
