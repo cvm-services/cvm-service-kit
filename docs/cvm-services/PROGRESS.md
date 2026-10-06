@@ -75,6 +75,8 @@
 - [x] Observability (partial): loopback `/health` + `/metrics` on every wrapper
       (sms4sats reports `treasury_balance_sats` + `low_treasury`; `HEALTH_PORT`)
 - [ ] Fleet alerting on `low_treasury` / `unconfigured`; richer counters
+- [x] Refusal-reason catalogue (`src/refusals.ts`, CEP-0001 P11) — stable
+      reasons + remedies; domain error codes asserted against it
 - [ ] ADR + README + CI evidence
 
 ---
