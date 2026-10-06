@@ -14,3 +14,5 @@ export * from "./http.ts";
 export * from "./lnwallet.ts";
 export * from "./l402.ts";
 export * from "./reseller.ts";
+export * from "./vocab.ts";
+export * from "./validate.ts";
