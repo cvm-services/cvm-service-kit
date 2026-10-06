@@ -26,9 +26,11 @@
 - [x] Pricing via treasury margin (markup/margin formula)
 - [x] Tests (mocked upstream + fake wallet) — 7 service tests
 - [x] server.ts wiring (env, NWC-or-fake wallet, announce)
+- [x] **Live E2E (read-only)**: an external CVM client called `list_services`
+      over Nostr; the wrapper returned the full sms4sats catalogue
 - [ ] Email tools (`create_email_order`, `email_status`, `cancel`)
-- [!] Live E2E — **blocked on treasury NWC wallet + funded upstream**
-- [ ] Announcement (class `sms`) + registry entry (after live proof)
+- [!] Paid live E2E — **blocked on treasury NWC wallet + funded upstream**
+- [ ] Announcement (class `sms`) + registry entry (after paid proof)
 
 ## Phase 2 — AI
 
@@ -72,3 +74,5 @@
 | Date | Item | Evidence |
 |---|---|---|
 | 2026-10-06 | Plan | PLAN.md + PROGRESS.md |
+| 2026-10-06 | Phase 0 | 59 tests pass, `tsc` clean (pricing/orders/http/lnwallet/l402/reseller) |
+| 2026-10-06 | Phase 1 | live `list_services` over Nostr → upstream sms4sats catalogue |
