@@ -69,7 +69,8 @@
       `iifname "loomtap*" drop`) in the executor role; verified a guest cannot
       reach `1.1.1.1:80` while offline code still runs (4/4 smoke PASS)
 - [ ] Opt-in, metered network tier (flip `cvm_lambda_deny_egress` and gate it)
-- [ ] Admission queue + global concurrency cap
+- [x] Admission queue — `ConcurrencyLimiter` (FIFO, `queue_timeout` refusal) in
+      the kit; wired into cvm-lambda `run_code`/`submit_job` (`MAX_CONCURRENCY`)
 - [ ] Vault secrets (provider nsec, treasury key); rotation runbook
 - [ ] Observability: health, counters, low-balance alerts, reconciliation
 - [ ] ADR + README + CI evidence
@@ -102,3 +103,4 @@
 | 2026-10-06 | Phase 1 | live `list_services` over Nostr → upstream sms4sats catalogue |
 | 2026-10-06 | Phase 2 | NanoGPT + PPQ wrappers, 73 tests pass, `tsc` clean |
 | 2026-10-06 | Phase 5 | durable gate store + rate limiter wired into cvm-lambda |
+| 2026-10-06 | Phase 0/5 | generic `cvm_service` Ansible role; wrappers deployed staging; egress deny; admission queue |

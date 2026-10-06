@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   CashuProcessor,
+  ConcurrencyLimiter,
   CvmServer,
   ExplicitGate,
   RateLimiter,
@@ -34,6 +35,7 @@ interface Config {
   gateDb: string;
   rateCapacity: number;
   rateRefillPerSec: number;
+  maxConcurrency: number;
   announce: boolean;
   paymentMode: "none" | "cashu";
   cashuMintUrl: string;
@@ -55,6 +57,7 @@ function configFromEnv(env: Record<string, string | undefined>): Config {
     gateDb: env.GATE_DB ?? "/var/lib/loom/cvm-lambda/gate.sqlite",
     rateCapacity: Number(env.RATE_CAPACITY ?? "10"),
     rateRefillPerSec: Number(env.RATE_REFILL_PER_SEC ?? "1"),
+    maxConcurrency: Number(env.MAX_CONCURRENCY ?? "2"),
     announce: (env.ANNOUNCE ?? "true") !== "false",
     paymentMode: (env.PAYMENT_MODE as Config["paymentMode"]) ?? "none",
     cashuMintUrl: env.CASHU_MINT_URL ?? "https://testnut.cashu.exchange",
@@ -121,6 +124,7 @@ export function buildTools(cfg: Config, jobs: JobManager): Tool[] {
     capacity: cfg.rateCapacity,
     refillPerSec: cfg.rateRefillPerSec,
   });
+  const queue = new ConcurrencyLimiter(cfg.maxConcurrency);
 
   const runCode: Tool = {
     definition: {
@@ -147,7 +151,7 @@ export function buildTools(cfg: Config, jobs: JobManager): Tool[] {
     },
     handler: async (args, ctx) => {
       limiter.assert(ctx.caller);
-      if (!gate) return runOnce(cfg, args);
+      if (!gate) return queue.run(() => runOnce(cfg, args));
       const orderId = String(args.order_id ?? deriveOrderId(ctx.caller, args));
       return gate.gate({
         tool: "run_code",
@@ -155,7 +159,7 @@ export function buildTools(cfg: Config, jobs: JobManager): Tool[] {
         amountSats: cfg.priceSats,
         orderId,
         proof: typeof args.cashu_token === "string" ? args.cashu_token : undefined,
-        run: () => runOnce(cfg, args),
+        run: () => queue.run(() => runOnce(cfg, args)),
       });
     },
   };
@@ -179,7 +183,7 @@ export function buildTools(cfg: Config, jobs: JobManager): Tool[] {
     handler: (args, ctx) => {
       limiter.assert(ctx.caller);
       const id = jobs.submit(ctx.caller, String(args.language ?? ""));
-      void jobs.run(id, () => runOnce(cfg, args));
+      void jobs.run(id, () => queue.run(() => runOnce(cfg, args)));
       return { job_id: id, status: "queued" };
     },
   };
