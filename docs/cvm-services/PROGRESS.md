@@ -43,13 +43,18 @@
 
 ## Phase 3 — rates
 
+- [~] API discovery: OrangeFren public API not found on-site; CypherGoat exposes
+      `api.cyphergoat.com` with a `/reference` page but `/docs/swagger.json`
+      404s — **needs manual API discovery** before implementing
 - [ ] OrangeFren wrapper (`get_rates`)
 - [ ] CypherGoat wrapper (`get_rates`)
 - [ ] Announcements + registry entries
 
 ## Phase 4 — swap
 
-- [ ] Verify Trocador API key + Boltz reachability from deploy host
+- [x] Reachability checked: Boltz `api.boltz.exchange` **unreachable from the
+      control host and vps3** (deferred); Trocador API returns 401 (key required)
+- [ ] Obtain Trocador API key
 - [ ] Trocador wrapper (`get_rates`, `quote`, `create_exchange`, `status`)
 - [ ] Boltz wrapper (`get_pairs`, `get_fees`, `create_*_swap`, `get_swap_status`)
 - [ ] Announcements + registry entries
