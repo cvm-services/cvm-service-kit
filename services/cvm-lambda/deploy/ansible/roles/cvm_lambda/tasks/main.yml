@@ -249,3 +249,20 @@
   ansible.builtin.systemd:
     name: cvm-lambda
     state: restarted
+
+# --- Guard against locking ourselves out ------------------------------------
+# Repeated SSH to a fail2ban-protected host can ban the operator IP. Whitelist
+# the controller's current public IP (best-effort, runtime allow-list).
+- name: Determine controller public IP
+  become: false
+  delegate_to: localhost
+  ansible.builtin.command: curl -s https://api.ipify.org
+  register: cvm_controller_ip
+  changed_when: false
+  failed_when: false
+
+- name: Whitelist the controller IP in fail2ban
+  when: (cvm_controller_ip.stdout | default('') | trim) is match('^[0-9]+(\.[0-9]+){3}$')
+  ansible.builtin.shell: >-
+    fail2ban-client set sshd addignoreip {{ cvm_controller_ip.stdout | trim }} || true
+  changed_when: false
