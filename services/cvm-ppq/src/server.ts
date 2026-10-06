@@ -66,6 +66,7 @@ async function main() {
     tools,
     defaultD: "cvm-ppq-01",
     env,
+    healthReport: () => ({ status: apiKey ? "ok" : "unconfigured", price_sats: priceSats }),
   });
 }
 
