@@ -4,6 +4,12 @@
 cvm_lambda_user: debian
 # Pin bun so the remote lockfile handling matches the committed bun.lock.
 cvm_lambda_bun_version: "1.4.2"
+
+# Deny egress from microVM TAP interfaces (loomtap-*). The adapter creates the
+# TAP + NAT unconditionally; this rule (matched by interface name, so it applies
+# to future TAPs) makes guest network egress a refused default. Set false only
+# when a metered, opt-in network tier is implemented.
+cvm_lambda_deny_egress: true
 cvm_lambda_repo_dir: /home/debian/cvm-service-kit
 cvm_lambda_state_dir: /var/lib/loom
 cvm_lambda_socket: /run/loom/adapter.sock
