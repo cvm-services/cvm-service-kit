@@ -52,7 +52,9 @@ cvm_lambda_cashu_mint_url: "https://testnut.cashu.exchange"
 cvm_lambda_price_sats: 2
 cvm_lambda_max_timeout_ms: 60000
 cvm_lambda_max_output_bytes: 65536
-cvm_lambda_relays: "wss://nostr.mom,wss://relay.primal.net,wss://nos.lol,wss://relay2.contextvm.org"
+# Relay set to announce on. Includes wss://relay2.orangesync.tech, which the
+# cvm-registry collector crawls (collector/collect.ts default relays).
+cvm_lambda_relays: "wss://nostr.mom,wss://relay.primal.net,wss://nos.lol,wss://relay2.contextvm.org,wss://relay2.orangesync.tech"
 # SERVER_SECRET_KEY: set via vault/env for production. If unset on first run a
 # key is generated and persisted to /etc/cvm-lambda/env (never regenerated).
 cvm_lambda_server_key: ""
