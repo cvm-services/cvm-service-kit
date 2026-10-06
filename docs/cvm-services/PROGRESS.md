@@ -79,13 +79,15 @@
 
 ## Known issues
 
-- **Adapter VM recycle is intermittently fragile.** After a job, the pool can
-  recycle and fail with `ioctl(TUNSETIFF): Device or resource busy` +
-  `Failed to recycle VM pool-0: Failed to add vsock`, leaving the pool
-  unhealthy (jobs then report "Pool exhausted" until restart). Mitigation:
-  `systemctl restart loom-adapter-firecracker`. Root cause not yet chased
-  (possible TAP teardown race + max_age recycle). Not caused by egress deny —
-  4 sequential jobs passed after a restart.
+- **Adapter VM recycle (FIXED).** Recycle failed with `Failed to add vsock`
+  because `kill_vm` reused the vm dir with a stale `vsock.sock` (and raced the
+  exiting firecracker). `loom-adapter-recycle.patch` makes `kill_vm` wait for
+  exit and remove `vsock.sock`; recycle now succeeds (`VM pool-0 recycled`).
+  Verified with `adapter_max_age=0` (recycle after every release).
+- **Slow recycle (~37 s).** The adapter COW-copies the 5 GB rootfs on recycle
+  (ext4 has no reflink), leaving the pool empty for ~37 s. At the default hourly
+  `max_age` this is a rare blip; shrinking the rootfs (drop docker/ffmpeg) would
+  cut it. Follow-up.
 
 ## Open items / decisions
 
@@ -104,3 +106,4 @@
 | 2026-10-06 | Phase 2 | NanoGPT + PPQ wrappers, 73 tests pass, `tsc` clean |
 | 2026-10-06 | Phase 5 | durable gate store + rate limiter wired into cvm-lambda |
 | 2026-10-06 | Phase 0/5 | generic `cvm_service` Ansible role; wrappers deployed staging; egress deny; admission queue |
+| 2026-10-06 | ops | adapter recycle fix (vsock cleanup) verified with max_age=0; executor 4/4 PASS at default |

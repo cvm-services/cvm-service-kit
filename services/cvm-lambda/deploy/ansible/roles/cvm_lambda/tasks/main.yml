@@ -133,6 +133,7 @@
     src: loom-adapter.default.j2
     dest: /etc/default/loom-adapter
     mode: "0644"
+  register: cvm_adapter_conf
 
 - name: Adapter unit
   ansible.builtin.copy:
@@ -147,12 +148,13 @@
     state: started
     daemon_reload: true
 
-- name: Restart adapter after a Firecracker, kernel or adapter-binary change
+- name: Restart adapter after a Firecracker, kernel, adapter-binary or config change
   when: >-
     cvm_fc_ver.rc != 0
     or firecracker_version not in cvm_fc_ver.stdout
     or cvm_kernel.changed
     or cvm_adapter_bin.changed
+    or cvm_adapter_conf.changed
   ansible.builtin.systemd:
     name: loom-adapter-firecracker
     state: restarted

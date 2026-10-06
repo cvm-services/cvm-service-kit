@@ -1,0 +1,33 @@
+diff --git a/src/firecracker.rs b/src/firecracker.rs
+index 12b0829..679da14 100644
+--- a/src/firecracker.rs
++++ b/src/firecracker.rs
+@@ -533,6 +533,17 @@ pub async fn kill_vm(vm: &Vm) {
+             nix::unistd::Pid::from_raw(pid as i32),
+             nix::sys::signal::Signal::SIGKILL,
+         );
++        // Wait for the process to actually exit so it releases the TAP fd and
++        // runtime files before we reuse the same vm dir.
++        for _ in 0..100 {
++            match nix::sys::signal::kill(
++                nix::unistd::Pid::from_raw(pid as i32),
++                None::<nix::sys::signal::Signal>,
++            ) {
++                Err(nix::errno::Errno::ESRCH) => break,
++                _ => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
++            }
++        }
+     }
+     // Clean up TAP device
+     let tap_name = format!("loomtap-{}", vm.id);
+@@ -545,6 +556,10 @@ pub async fn kill_vm(vm: &Vm) {
+     let vm_dir = vm.api_socket.parent();
+     if let Some(dir) = vm_dir {
+         let _ = std::fs::remove_file(dir.join("firecracker.pid"));
++        // Remove the vsock UDS too: the next VM reuses this vm dir and
++        // firecracker fails to bind the vsock if the stale socket remains
++        // ("Failed to add vsock" on recycle).
++        let _ = std::fs::remove_file(dir.join("vsock.sock"));
+     }
+ }
+ 
