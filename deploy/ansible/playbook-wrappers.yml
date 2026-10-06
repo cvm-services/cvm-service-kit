@@ -1,0 +1,66 @@
+---
+# Deploy the ContextVM service wrappers.
+#
+# Staging note: ANNOUNCE=false until the treasury NWC wallet + upstream keys are
+# supplied. Flip to "true" (and set the secrets) to publish to CEP-6 discovery.
+#
+#   cd deploy/ansible
+#   ansible-playbook playbook-wrappers.yml
+- name: Deploy ContextVM service wrappers
+  hosts: executor
+  become: true
+  vars:
+    common_relays: "wss://nostr.mom,wss://relay.primal.net,wss://nos.lol,wss://relay2.contextvm.org,wss://relay2.orangesync.tech"
+    wrappers:
+      - name: cvm-sms4sats
+        script: services/cvm-sms4sats/src/server.ts
+        state_dir: /var/lib/loom/cvm-sms4sats
+        config:
+          RELAYS: "{{ common_relays }}"
+          ANNOUNCE: "false"
+          ANNOUNCE_D: cvm-sms4sats-01
+          SERVICE_CLASS: sms
+          PAYMENT_MODE: cashu
+          CASHU_MINT_URL: https://testnut.cashu.exchange
+          MARGIN: "0.2"
+          MIN_PRICE_SATS: "1"
+          TREASURY_FLOOR_SATS: "1000"
+          ORDER_DB: /var/lib/loom/cvm-sms4sats/orders.sqlite
+      - name: cvm-nanogpt
+        script: services/cvm-nanogpt/src/server.ts
+        state_dir: /var/lib/loom/cvm-nanogpt
+        config:
+          RELAYS: "{{ common_relays }}"
+          ANNOUNCE: "false"
+          ANNOUNCE_D: cvm-nanogpt-01
+          SERVICE_CLASS: ai
+          PAYMENT_MODE: cashu
+          CASHU_MINT_URL: https://testnut.cashu.exchange
+          PRICE_CHAT_SATS: "5"
+          NANOGPT_BASE: https://nano-gpt.com/api/v1
+          DEFAULT_MODEL: openai/gpt-4.1-nano
+          GATE_DB: /var/lib/loom/cvm-nanogpt/gate.sqlite
+      - name: cvm-ppq
+        script: services/cvm-ppq/src/server.ts
+        state_dir: /var/lib/loom/cvm-ppq
+        config:
+          RELAYS: "{{ common_relays }}"
+          ANNOUNCE: "false"
+          ANNOUNCE_D: cvm-ppq-01
+          SERVICE_CLASS: ai
+          PAYMENT_MODE: cashu
+          CASHU_MINT_URL: https://testnut.cashu.exchange
+          PRICE_CHAT_SATS: "5"
+          PPQ_BASE: https://api.ppq.ai/v1
+          DEFAULT_MODEL: deepseek/deepseek-v3.2
+          GATE_DB: /var/lib/loom/cvm-ppq/gate.sqlite
+  tasks:
+    - name: Deploy each wrapper
+      ansible.builtin.include_role:
+        name: cvm_service
+      vars:
+        cvm_service_name: "{{ item.name }}"
+        cvm_service_script: "{{ item.script }}"
+        cvm_service_config: "{{ item.config }}"
+        cvm_service_state_dir: "{{ item.state_dir }}"
+      loop: "{{ wrappers }}"

@@ -1,0 +1,114 @@
+---
+# Deploy one ContextVM service wrapper. Idempotent.
+
+- name: Check installed bun version
+  ansible.builtin.command: "{{ cvm_service_home }}/.bun/bin/bun --version"
+  register: cvm_bun_ver
+  changed_when: false
+  failed_when: false
+
+- name: Install bun {{ cvm_bun_version }}
+  when: cvm_bun_ver.rc != 0 or cvm_bun_version not in cvm_bun_ver.stdout
+  ansible.builtin.shell:
+    cmd: "curl -fsSL https://bun.sh/install | bash -s \"bun-v{{ cvm_bun_version }}\""
+  args:
+    executable: /bin/bash
+
+- name: Sync wrapper source
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../../"
+    dest: "{{ cvm_service_repo_dir }}/"
+    delete: true
+    checksum: true
+    rsync_opts:
+      - "--exclude=node_modules"
+      - "--exclude=.git"
+      - "--exclude=.artifacts"
+      - "--exclude=*.sqlite"
+      - "--omit-dir-times"
+  become: false
+  register: cvm_sync
+
+- name: Install dependencies (frozen lockfile)
+  ansible.builtin.command:
+    cmd: "{{ cvm_service_home }}/.bun/bin/bun install --frozen-lockfile"
+    chdir: "{{ cvm_service_repo_dir }}"
+  become: false
+  register: cvm_deps
+  changed_when: "'packages installed' in cvm_deps.stdout"
+
+- name: State directory
+  when: cvm_service_state_dir is defined
+  ansible.builtin.file:
+    path: "{{ cvm_service_state_dir }}"
+    state: directory
+    owner: "{{ cvm_service_user }}"
+    group: "{{ cvm_service_user }}"
+    mode: "0755"
+
+- name: Config directory
+  ansible.builtin.file:
+    path: "/etc/{{ cvm_service_name }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Config env (managed)
+  ansible.builtin.template:
+    src: config.env.j2
+    dest: "/etc/{{ cvm_service_name }}/config.env"
+    owner: root
+    group: root
+    mode: "0644"
+  register: cvm_config
+
+- name: Check secret env
+  ansible.builtin.stat:
+    path: "/etc/{{ cvm_service_name }}/secret.env"
+  register: cvm_secret_stat
+
+- name: Secret env (write once)
+  when: not cvm_secret_stat.stat.exists
+  ansible.builtin.template:
+    src: secret.env.j2
+    dest: "/etc/{{ cvm_service_name }}/secret.env"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Systemd unit
+  ansible.builtin.template:
+    src: service.service.j2
+    dest: "/etc/systemd/system/{{ cvm_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  register: cvm_unit
+
+- name: Enable + start
+  ansible.builtin.systemd:
+    name: "{{ cvm_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Restart on change
+  when: cvm_config.changed or cvm_unit.changed or cvm_sync.changed
+  ansible.builtin.systemd:
+    name: "{{ cvm_service_name }}"
+    state: restarted
+
+- name: Determine controller public IP
+  become: false
+  delegate_to: localhost
+  ansible.builtin.command: curl -s https://api.ipify.org
+  register: cvm_controller_ip
+  changed_when: false
+  failed_when: false
+
+- name: Whitelist the controller IP in fail2ban
+  when: (cvm_controller_ip.stdout | default('') | trim) is match('^[0-9]+(\.[0-9]+){3}$')
+  ansible.builtin.shell: >-
+    fail2ban-client set sshd addignoreip {{ cvm_controller_ip.stdout | trim }} || true
+  changed_when: false
