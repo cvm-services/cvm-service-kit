@@ -5,6 +5,7 @@ import {
   secretKeyFrom,
   type Tool,
 } from "../../src/index.ts";
+import { startHealthServer, type HealthReport } from "./health.ts";
 
 const RELAYS_DEFAULT = [
   "wss://nostr.mom",
@@ -22,6 +23,8 @@ export interface StartOptions {
   tools: Tool[];
   defaultD?: string;
   env?: Record<string, string | undefined>;
+  /** Optional loopback health report (enabled by HEALTH_PORT). */
+  healthReport?: () => Promise<HealthReport> | HealthReport;
 }
 
 /** Shared bootstrap for a wrapper CVM: connect relays, announce, handle shutdown. */
@@ -44,6 +47,11 @@ export async function startService(o: StartOptions): Promise<void> {
   });
   await server.start();
   console.log(`[${o.name}] pubkey: ${pubkeyHexOf(sk)}`);
+
+  const healthPort = Number(env.HEALTH_PORT ?? "0");
+  if (healthPort > 0) {
+    startHealthServer({ service: o.name, port: healthPort, report: o.healthReport });
+  }
 
   if (announce) {
     await publishAnnouncement(

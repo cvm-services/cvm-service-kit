@@ -26,6 +26,7 @@
           MIN_PRICE_SATS: "1"
           TREASURY_FLOOR_SATS: "1000"
           ORDER_DB: /var/lib/loom/cvm-sms4sats/orders.sqlite
+          HEALTH_PORT: "8781"
       - name: cvm-nanogpt
         script: services/cvm-nanogpt/src/server.ts
         state_dir: /var/lib/loom/cvm-nanogpt
@@ -40,6 +41,7 @@
           NANOGPT_BASE: https://nano-gpt.com/api/v1
           DEFAULT_MODEL: openai/gpt-4.1-nano
           GATE_DB: /var/lib/loom/cvm-nanogpt/gate.sqlite
+          HEALTH_PORT: "8782"
       - name: cvm-ppq
         script: services/cvm-ppq/src/server.ts
         state_dir: /var/lib/loom/cvm-ppq
@@ -54,6 +56,7 @@
           PPQ_BASE: https://api.ppq.ai/v1
           DEFAULT_MODEL: deepseek/deepseek-v3.2
           GATE_DB: /var/lib/loom/cvm-ppq/gate.sqlite
+          HEALTH_PORT: "8783"
   tasks:
     - name: Deploy each wrapper
       ansible.builtin.include_role:

@@ -72,7 +72,9 @@
 - [x] Admission queue — `ConcurrencyLimiter` (FIFO, `queue_timeout` refusal) in
       the kit; wired into cvm-lambda `run_code`/`submit_job` (`MAX_CONCURRENCY`)
 - [ ] Vault secrets (provider nsec, treasury key); rotation runbook
-- [ ] Observability: health, counters, low-balance alerts, reconciliation
+- [x] Observability (partial): loopback `/health` + `/metrics` on every wrapper
+      (sms4sats reports `treasury_balance_sats` + `low_treasury`; `HEALTH_PORT`)
+- [ ] Fleet alerting on `low_treasury` / `unconfigured`; richer counters
 - [ ] ADR + README + CI evidence
 
 ---

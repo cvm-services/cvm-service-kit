@@ -43,6 +43,10 @@ async function main() {
     tools,
     defaultD: "cvm-nanogpt-01",
     env,
+    healthReport: () => ({
+      status: env.NANOGPT_API_KEY ? "ok" : "unconfigured",
+      price_sats: priceSats,
+    }),
   });
 }
 

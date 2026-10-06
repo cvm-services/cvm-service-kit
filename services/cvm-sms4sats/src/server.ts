@@ -13,6 +13,7 @@ import {
   type LnWallet,
   type PaymentProcessor,
 } from "../../../src/index.ts";
+import { startHealthServer } from "../../_shared/health.ts";
 import { Sms4SatsClient } from "./upstream.ts";
 import { buildSmsTools } from "./tools.ts";
 
@@ -96,6 +97,18 @@ async function main() {
   });
   await server.start();
   console.log(`[cvm-sms4sats] pubkey: ${pubkeyHexOf(sk)}`);
+
+  const healthPort = Number(process.env.HEALTH_PORT ?? "0");
+  if (healthPort > 0) {
+    startHealthServer({
+      service: "cvm-sms4sats",
+      port: healthPort,
+      report: async () => ({
+        status: (await treasury.canSpend(cfg.minPriceSats)) ? "ok" : "low_treasury",
+        treasury_balance_sats: await treasury.balanceSats(),
+      }),
+    });
+  }
 
   if (cfg.announce) {
     await publishAnnouncement(
