@@ -143,6 +143,12 @@ Hosts: **vps2** = `debian@23.182.128.51` (nested KVM), **controller** = T14Gen5.
 
 ## Operational notes / incidents
 
+- **Ansible is idempotent.** A second consecutive `ansible-playbook playbook.yml`
+  reports `changed=0`. Two fixes were needed: pin `bun` (`1.4.2`, matching the
+  committed `bun.lock`) and install with `--frozen-lockfile` so the remote never
+  rewrites the lock; and add `--omit-dir-times` to the rsync sync so `bun
+  install` touching the repo dir does not churn directory mtimes.
+
 - **fail2ban bans the operator IP (2026-10-06).** After ~4k failed *bot* logins,
   vps2's `sshd` jail banned the shared operator IP `80.187.85.172`; sshd looked
   down but the host was healthy (ICMP + 80/443 up, `systemctl is-active sshd` =
