@@ -1,0 +1,58 @@
+---
+# cvm-lambda executor + control plane. All values pinned for reproducibility.
+
+cvm_lambda_user: debian
+cvm_lambda_repo_dir: /home/debian/cvm-service-kit
+cvm_lambda_state_dir: /var/lib/loom
+cvm_lambda_socket: /run/loom/adapter.sock
+
+# --- Firecracker (pinned) ---
+# v1.16.1 is the version the Loom adapter was verified against. It MUST be a
+# release that supports `--enable-pci` (the adapter passes it unconditionally;
+# v1.10.x rejects it and the API socket never appears).
+firecracker_version: v1.16.1
+firecracker_url: "https://github.com/firecracker-microvm/firecracker/releases/download/{{ firecracker_version }}/firecracker-{{ firecracker_version }}-x86_64.tgz"
+firecracker_tgz_sha256: "382a02a869e4d6d5cb14c40577f9545e8458021ea8b0b2d3fc10ec14d9c242e6"
+
+# --- Guest kernel (pinned by sha256) ---
+# Firecracker CI kernel 6.1.155. MUST be a modern (6.x) kernel with PCI virtio:
+# the adapter passes `--enable-pci`, and the old 4.14 quickstart vmlinux cannot
+# mount the PCI virtio-blk root device (kernel panic: VFS unable to mount vda).
+firecracker_kernel_url: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/x86_64/vmlinux-6.1.155"
+firecracker_kernel_sha256: "e20e46d0c36c55c0d1014eb20576171b3f3d922260d9f792017aeff53af3d4f2"
+
+# --- Loom adapter (pinned commit) ---
+loom_adapter_commit: "251111baea5741c556f10be9bb0bf50ee4e9c36e"
+loom_adapter_remote: "nostr://npub1gl4q43rngdc7mnrflz98kan6dq5h76xepfpe0cvmapr0sc0wdpas0kd86j/relay.ngit.dev/loom-adapter-firecracker"
+loom_vsock_agent_sha256: "6d5027994e8a71ac30f1b7f1e9161c19e11cf467636dbfa8f875fdee3c150d55"
+
+# Local build output directory (gitignored).
+cvm_lambda_artifacts_dir: "{{ lookup('env', 'HOME') }}/.cache/cvm-lambda/artifacts"
+
+# --- Rootfs ---
+# The guest is Ubuntu 24.04 + python3/node/bash/golang/rustc + loom-vsock-agent.
+rootfs_size_gib: 5
+
+# --- VM pool (small host) ---
+adapter_pool_size: 1
+adapter_cpus: 1
+adapter_mem_mib: 1024
+adapter_max_age: 3600
+adapter_max_jobs: 100
+
+# --- Control plane ---
+cvm_lambda_announce: "true"
+cvm_lambda_announce_d: "cvm-lambda-01"
+cvm_lambda_service_class: "compute"
+# CEP-8: price per run_code call, and the payment rail.
+# NOTE: testnut is TEST-ONLY (worthless ecash). Point cvm_lambda_cashu_mint_url
+# at a real mint before offering this publicly for value.
+cvm_lambda_payment_mode: "cashu"
+cvm_lambda_cashu_mint_url: "https://testnut.cashu.exchange"
+cvm_lambda_price_sats: 2
+cvm_lambda_max_timeout_ms: 60000
+cvm_lambda_max_output_bytes: 65536
+cvm_lambda_relays: "wss://nostr.mom,wss://relay.primal.net,wss://nos.lol,wss://relay2.contextvm.org"
+# SERVER_SECRET_KEY: set via vault/env for production. If unset on first run a
+# key is generated and persisted to /etc/cvm-lambda/env (never regenerated).
+cvm_lambda_server_key: ""

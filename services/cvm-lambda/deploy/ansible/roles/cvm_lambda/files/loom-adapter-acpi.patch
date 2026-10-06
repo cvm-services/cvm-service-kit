@@ -1,0 +1,13 @@
+diff --git a/src/firecracker.rs b/src/firecracker.rs
+index 12b0829..5a5b5b0 100644
+--- a/src/firecracker.rs
++++ b/src/firecracker.rs
+@@ -113,7 +113,7 @@ impl FirecrackerApi {
+         // Use acpi=off to prevent ACPI-based virtio discovery from conflicting
+         // with Firecracker's cmdline-based virtio_mmio.device= parameters.
+         // Without this, virtio-mmio devices fail with -EBUSY on modern kernels.
+-        let boot_args = "console=ttyS0 reboot=k panic=1 acpi=off i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd random.trust_cpu=on";
++        let boot_args = "console=ttyS0 reboot=k panic=1 root=/dev/vda i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd random.trust_cpu=on";
+         self.put(
+             "/boot-source",
+             &format!(

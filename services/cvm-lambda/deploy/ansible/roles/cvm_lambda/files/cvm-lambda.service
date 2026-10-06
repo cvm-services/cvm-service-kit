@@ -1,0 +1,21 @@
+[Unit]
+Description=cvm-lambda — serverless code execution ContextVM service
+After=network-online.target loom-adapter-firecracker.service
+Wants=loom-adapter-firecracker.service
+
+[Service]
+Type=simple
+User=debian
+WorkingDirectory=/home/debian/cvm-service-kit/services/cvm-lambda
+# config.env is managed by Ansible and safe to overwrite; secret.env holds the
+# generated SERVER_SECRET_KEY and is written once.
+EnvironmentFile=/etc/cvm-lambda/config.env
+EnvironmentFile=/etc/cvm-lambda/secret.env
+ExecStart=/home/debian/.bun/bin/bun /home/debian/cvm-service-kit/services/cvm-lambda/src/server.ts
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
