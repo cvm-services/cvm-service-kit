@@ -60,30 +60,30 @@ export function parseCapTags(tags: string[][]): Cap[] {
   return caps;
 }
 
-export type OrderStatus = "awaiting_payment" | "paid" | "settled" | "refused";
+export type GateOrderStatus = "awaiting_payment" | "paid" | "settled" | "refused";
 
-export interface Order {
+export interface GateOrder {
   orderId: string;
   tool: string;
   caller: string;
   amountSats: number;
   invoice: Invoice;
-  status: OrderStatus;
+  status: GateOrderStatus;
   /** Cached tool result, so a replayed payment_accepted never runs twice. */
   result?: unknown;
   createdAt: number;
   updatedAt: number;
 }
 
-export interface OrderStore {
-  get(orderId: string): Order | undefined;
-  put(order: Order): void;
+export interface GateOrderStore {
+  get(orderId: string): GateOrder | undefined;
+  put(order: GateOrder): void;
 }
 
-export class MemoryOrderStore implements OrderStore {
-  private readonly m = new Map<string, Order>();
+export class MemoryOrderStore implements GateOrderStore {
+  private readonly m = new Map<string, GateOrder>();
   get(id: string) { return this.m.get(id); }
-  put(o: Order) { this.m.set(o.orderId, o); }
+  put(o: GateOrder) { this.m.set(o.orderId, o); }
 }
 
 /**
@@ -94,7 +94,7 @@ export class MemoryOrderStore implements OrderStore {
 export class ExplicitGate {
   constructor(
     private readonly processor: PaymentProcessor,
-    private readonly store: OrderStore = new MemoryOrderStore(),
+    private readonly store: GateOrderStore = new MemoryOrderStore(),
   ) {}
 
   async gate<T>(args: {

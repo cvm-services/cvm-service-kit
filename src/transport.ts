@@ -6,7 +6,6 @@ import {
 } from "nostr-tools";
 import { Relay } from "nostr-tools/relay";
 import type { CvmServerOptions, RelayLike, Tool } from "./types.ts";
-import { PaymentRequiredError } from "./payment.ts";
 
 export function secretKeyFrom(input: string | Uint8Array): Uint8Array {
   if (input instanceof Uint8Array) {
@@ -181,11 +180,13 @@ export class CvmServer {
           return err(id, -32601, `method not found: ${method}`);
       }
     } catch (e: any) {
-      if (e instanceof PaymentRequiredError) {
+      // Domain errors (payment_required, treasury_insufficient, …) carry a
+      // JSON-RPC code + data; surface them as protocol errors.
+      if (e && typeof e.code === "number" && e.code < 0 && e.data) {
         return {
           jsonrpc: "2.0",
           id,
-          error: { code: e.code, message: "payment_required", data: e.data },
+          error: { code: e.code, message: e.message, data: e.data },
         };
       }
       return ok(id, {
