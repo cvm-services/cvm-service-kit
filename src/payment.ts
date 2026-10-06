@@ -24,8 +24,12 @@ export interface PaymentProcessor {
     amountSats: number;
     caller: string;
   }): Promise<Invoice>;
-  /** Return true once the invoice has been settled. */
-  isPaid(invoice: Invoice): Promise<boolean>;
+  /**
+   * Return true once the invoice is settled. `proof` is an optional
+   * client-supplied payment proof (e.g. a Cashu token); Lightning processors
+   * ignore it and poll, Cashu processors redeem it.
+   */
+  verify(invoice: Invoice, proof?: string): Promise<boolean>;
 }
 
 /** Thrown by a tool handler when an unpaid call must be refused (CEP-8 explicit_gating). */
@@ -98,6 +102,8 @@ export class ExplicitGate {
     caller: string;
     amountSats: number;
     orderId: string;
+    /** Client-supplied payment proof (e.g. a Cashu token). */
+    proof?: string;
     run: () => Promise<T>;
   }): Promise<T> {
     let order = this.store.get(args.orderId);
@@ -128,7 +134,7 @@ export class ExplicitGate {
     }
 
     if (order.status === "awaiting_payment") {
-      const paid = await this.processor.isPaid(order.invoice);
+      const paid = await this.processor.verify(order.invoice, args.proof);
       if (!paid) {
         throw new PaymentRequiredError("payment_required", {
           orderId: order.orderId,

@@ -50,6 +50,10 @@ export class CvmServer {
   private readonly opts: CvmServerOptions;
   private readonly tools = new Map<string, Tool>();
   private relays: RelayLike[] = [];
+  // Gift-wrap events arrive once per relay the client published to. Process
+  // each event id exactly once, or a paid call runs (and pays) N times.
+  private seen = new Map<string, number>();
+  private readonly seenTtlMs = 10 * 60_000;
 
   constructor(opts: CvmServerOptions) {
     this.opts = opts;
@@ -99,7 +103,18 @@ export class CvmServer {
     this.relays = [];
   }
 
+  private isDuplicate(eventId: string): boolean {
+    const now = Date.now();
+    if (this.seen.size > 5000) {
+      for (const [id, t] of this.seen) if (now - t > this.seenTtlMs) this.seen.delete(id);
+    }
+    if (this.seen.has(eventId)) return true;
+    this.seen.set(eventId, now);
+    return false;
+  }
+
   private async handleGiftWrap(event: any): Promise<void> {
+    if (this.isDuplicate(event.id)) return;
     const convKey = nip44.v2.utils.getConversationKey(
       this.secretKey,
       event.pubkey,

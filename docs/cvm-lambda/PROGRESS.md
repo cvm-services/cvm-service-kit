@@ -85,13 +85,21 @@ Hosts: **vps2** = `debian@23.182.128.51` (nested KVM), **controller** = T14Gen5.
 
 ---
 
-## M5 — CEP-8 payment  [~]
+## M5 — CEP-8 payment (Cashu)  ✅
 
-- [x] `cap` parsing/validation; `pmi` advertised
+- [x] `cap` parsing/validation; `pmi=bitcoin-cashu` advertised
 - [x] `explicit_gating` helper + idempotent order store (replay does not re-run)
 - [x] `PaymentRequiredError` → JSON-RPC `payment_required` error
-- [ ] Wire a real processor (Cashu and/or BOLT11/NWC)
-- [ ] Set a non-zero `PRICE_RUN_CODE_SATS` and advertise `cap`
+- [x] `CashuProcessor` (cashu-ts v2): refunds the token **face value** (mint swap
+      fee is the server's cost, not the payer's underpayment)
+- [x] `PRICE_RUN_CODE_SATS=2`, `PAYMENT_MODE=cashu`, mint `testnut.cashu.exchange`
+- [x] Config/secret split: managed `config.env` + write-once `secret.env`
+- [x] Transport dedupes gift-wrap events by id (multi-relay publish otherwise
+      makes a paid call run N times)
+- [x] Acceptance: unpaid → `payment_required`; paid token → `stdout "42\n"`;
+      same order_id replay → cached success; same token new order → refused (spent)
+- [ ] Persist the order store (in-memory today; survives only per process)
+- [ ] Replace testnut with a real mint before charging real value
 
 ---
 
@@ -123,6 +131,7 @@ Hosts: **vps2** = `debian@23.182.128.51` (nested KVM), **controller** = T14Gen5.
 | 2026-10-06 | M3 | `run_code` → `{"exit_code":0,"stdout":"42\n"}` |
 | 2026-10-06 | M4 | `submit_job`→`job_result` → `status=succeeded stdout="42\n"` |
 | 2026-10-06 | M3 | after IaC rebuild: `run_code` rustc → `stdout "42\n"` |
+| 2026-10-06 | M5 | no token → `payment_required`; Cashu token → `stdout "42\n"`; order replay → cached; token replay → refused |
 
 ---
 

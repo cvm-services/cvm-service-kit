@@ -187,6 +187,7 @@
       - "--exclude=.artifacts"
       - "--exclude=*.sqlite"
   become: false
+  register: cvm_sync
 
 - name: Install control-plane deps
   ansible.builtin.command:
@@ -205,19 +206,28 @@
     group: root
     mode: "0755"
 
-- name: Check control-plane env (secret must persist)
+- name: Check control-plane secret (must persist)
   ansible.builtin.stat:
-    path: /etc/cvm-lambda/env
-  register: cvm_env
+    path: /etc/cvm-lambda/secret.env
+  register: cvm_secret
 
-- name: Write control-plane env (first run only)
-  when: not cvm_env.stat.exists
+- name: Write control-plane secret (first run only)
+  when: not cvm_secret.stat.exists
   ansible.builtin.template:
-    src: cvm-lambda.env.j2
-    dest: /etc/cvm-lambda/env
+    src: secret.env.j2
+    dest: /etc/cvm-lambda/secret.env
     owner: root
     group: root
     mode: "0600"
+
+- name: Write control-plane config (always)
+  ansible.builtin.template:
+    src: config.env.j2
+    dest: /etc/cvm-lambda/config.env
+    owner: root
+    group: root
+    mode: "0644"
+  register: cvm_config
 
 - name: Control-plane unit
   ansible.builtin.copy:
@@ -231,3 +241,9 @@
     enabled: true
     state: started
     daemon_reload: true
+
+- name: Restart control plane after a config or source change
+  when: cvm_config.changed or cvm_sync.changed
+  ansible.builtin.systemd:
+    name: cvm-lambda
+    state: restarted

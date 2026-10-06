@@ -1,6 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
+  CashuProcessor,
   CvmServer,
+  ExplicitGate,
   publishAnnouncement,
   secretKeyFrom,
   pubkeyHexOf,
@@ -28,6 +30,8 @@ interface Config {
   maxOutputBytes: number;
   jobDb: string;
   announce: boolean;
+  paymentMode: "none" | "cashu";
+  cashuMintUrl: string;
 }
 
 function configFromEnv(env: Record<string, string | undefined>): Config {
@@ -44,6 +48,8 @@ function configFromEnv(env: Record<string, string | undefined>): Config {
     maxOutputBytes: Number(env.MAX_OUTPUT_BYTES ?? "65536"),
     jobDb: env.JOB_DB ?? "/var/lib/loom/cvm-lambda/jobs.sqlite",
     announce: (env.ANNOUNCE ?? "true") !== "false",
+    paymentMode: (env.PAYMENT_MODE as Config["paymentMode"]) ?? "none",
+    cashuMintUrl: env.CASHU_MINT_URL ?? "https://testnut.cashu.exchange",
   };
 }
 
@@ -88,7 +94,19 @@ async function runOnce(
   };
 }
 
+function deriveOrderId(caller: string, args: Record<string, unknown>): string {
+  return createHash("sha256")
+    .update(`${caller}\n${args.language}\n${args.code}`)
+    .digest("hex")
+    .slice(0, 32);
+}
+
 export function buildTools(cfg: Config, jobs: JobManager): Tool[] {
+  const gate =
+    cfg.paymentMode === "cashu" && cfg.priceSats > 0
+      ? new ExplicitGate(new CashuProcessor({ mintUrl: cfg.cashuMintUrl }))
+      : undefined;
+
   const runCode: Tool = {
     definition: {
       name: "run_code",
@@ -104,10 +122,26 @@ export function buildTools(cfg: Config, jobs: JobManager): Tool[] {
           stdin: { type: "string" },
           env: { type: "object", additionalProperties: { type: "string" } },
           timeout_ms: { type: "number" },
+          order_id: { type: "string", description: "idempotency key for a paid call" },
+          cashu_token: {
+            type: "string",
+            description: "Cashu token proving payment (CEP-8 bitcoin-cashu)",
+          },
         },
       },
     },
-    handler: (args) => runOnce(cfg, args),
+    handler: async (args, ctx) => {
+      if (!gate) return runOnce(cfg, args);
+      const orderId = String(args.order_id ?? deriveOrderId(ctx.caller, args));
+      return gate.gate({
+        tool: "run_code",
+        caller: ctx.caller,
+        amountSats: cfg.priceSats,
+        orderId,
+        proof: typeof args.cashu_token === "string" ? args.cashu_token : undefined,
+        run: () => runOnce(cfg, args),
+      });
+    },
   };
 
   const submitJob: Tool = {
@@ -224,7 +258,13 @@ async function main() {
         keywords: ["code", "compute", "sandbox", "lambda"],
         requiredInputs: [],
         optionalInputs: [],
-        pmi: ["bitcoin-cashu", "bitcoin-lightning-bolt11"],
+        // Advertise only the rails we actually accept.
+        pmi:
+          cfg.paymentMode === "cashu"
+            ? ["bitcoin-cashu"]
+            : cfg.paymentMode === "none"
+              ? []
+              : ["bitcoin-lightning-bolt11"],
       },
       { secretKey: sk, relays: cfg.relays, name: "cvm-lambda", tools },
     );

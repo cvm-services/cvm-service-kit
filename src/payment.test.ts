@@ -21,7 +21,7 @@ class FakeProcessor implements PaymentProcessor {
       pmi: this.pmi,
     };
   }
-  async isPaid(_i: Invoice) {
+  async verify(_i: Invoice, _proof?: string) {
     return this.paid;
   }
 }

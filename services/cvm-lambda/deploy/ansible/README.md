@@ -82,6 +82,28 @@ sudo iptables -t nat -S | grep 172.16.0.0/24     # inspect MASQUERADE rules
 sudo iptables -S | grep loomtap                   # inspect FORWARD rules
 ```
 
+## Payments (CEP-8 / Cashu)
+
+`run_code` is paid when `cvm_lambda_price_sats > 0` and
+`cvm_lambda_payment_mode: cashu`. The server:
+
+1. refuses an unpaid call with a JSON-RPC `payment_required` error carrying
+   `{ invoice: "cashu:<mint>:<sats>", amountSats, orderId, pmi }`;
+2. accepts the Cashu token as the `cashu_token` argument on the next call,
+   redeems it at the mint, and runs the tool;
+3. is idempotent per `order_id` (a replay returns the cached result) and the
+   mint refuses a re-spent token.
+
+Mint a token for testing (testnut only):
+
+```bash
+cd <repo>/services/cvm-lambda
+MINT=https://testnut.cashu.exchange bun tools/mint-testnut.ts 2   # prints cashuB...
+```
+
+**The Mint swap fee is the server's cost** — the payer is credited the token's
+face value, not the post-fee amount.
+
 ## Recovery / lockout
 
 `sshd` runs behind **fail2ban** on vps2. If provisioning or probing trips the

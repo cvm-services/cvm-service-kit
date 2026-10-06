@@ -44,7 +44,12 @@ adapter_max_jobs: 100
 cvm_lambda_announce: "true"
 cvm_lambda_announce_d: "cvm-lambda-01"
 cvm_lambda_service_class: "compute"
-cvm_lambda_price_sats: 0
+# CEP-8: price per run_code call, and the payment rail.
+# NOTE: testnut is TEST-ONLY (worthless ecash). Point cvm_lambda_cashu_mint_url
+# at a real mint before offering this publicly for value.
+cvm_lambda_payment_mode: "cashu"
+cvm_lambda_cashu_mint_url: "https://testnut.cashu.exchange"
+cvm_lambda_price_sats: 2
 cvm_lambda_max_timeout_ms: 60000
 cvm_lambda_max_output_bytes: 65536
 cvm_lambda_relays: "wss://nostr.mom,wss://relay.primal.net,wss://nos.lol,wss://relay2.contextvm.org"
