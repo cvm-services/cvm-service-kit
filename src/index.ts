@@ -5,6 +5,7 @@ export * from "./payment.ts";
 export * from "./cashu.ts";
 export * from "./gate-store.ts";
 export * from "./ratelimit.ts";
+export * from "./concurrency.ts";
 export * from "./openai.ts";
 export * from "./pricing.ts";
 export * from "./orders.ts";
