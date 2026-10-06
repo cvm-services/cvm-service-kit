@@ -103,11 +103,16 @@ Hosts: **vps2** = `debian@23.182.128.51` (nested KVM), **controller** = T14Gen5.
 
 ---
 
-## M6 — discovery  [~]
+## M6 — discovery  ✅
 
 - [x] 11316 announcement lands and is filterable (`#t`, `-d`)
-- [ ] Add provider npub to `cvm-registry/curators.json` (role `provider`)
-- [ ] Verify dashboard renders from cache; `#g` N/A (no fixed location)
+- [x] Announce on the registry's relay set (`wss://relay2.orangesync.tech`)
+- [x] Provider npub added to `cvm-registry/curators.json` (role `provider`)
+      — committed to `cvm-registry` main (`e2c1a01`)
+- [x] Collector keeps it (`kept=4`, `d=cvm-lambda-01`, class `compute`)
+- [x] Dashboard redeployed to vps3; live
+      `https://cvm.orangesync.tech/catalog.json` contains `cvm-lambda-01`
+- [x] `#g` N/A (location-less service publishes no geohash)
 
 ---
 
@@ -132,6 +137,7 @@ Hosts: **vps2** = `debian@23.182.128.51` (nested KVM), **controller** = T14Gen5.
 | 2026-10-06 | M4 | `submit_job`→`job_result` → `status=succeeded stdout="42\n"` |
 | 2026-10-06 | M3 | after IaC rebuild: `run_code` rustc → `stdout "42\n"` |
 | 2026-10-06 | M5 | no token → `payment_required`; Cashu token → `stdout "42\n"`; order replay → cached; token replay → refused |
+| 2026-10-06 | M6 | collector `kept=4` incl. `cvm-lambda-01`; live `https://cvm.orangesync.tech/catalog.json` contains it (HTTP 200) |
 
 ---
 
