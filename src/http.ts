@@ -41,21 +41,23 @@ export type FetchLike = (url: string, init?: any) => Promise<Response>;
 export async function callHttp(
   spec: HttpSpec,
   args: Record<string, unknown>,
-  opts: { fetchImpl?: FetchLike; signal?: AbortSignal } = {},
+  opts: { fetchImpl?: FetchLike; signal?: AbortSignal; substitute?: boolean } = {},
 ): Promise<HttpResult> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const url = new URL(subst(spec.url, args));
+  const doSubst = opts.substitute !== false;
+  const s = (v: string) => (doSubst ? subst(v, args) : v);
+  const url = new URL(s(spec.url));
   for (const [k, v] of Object.entries(spec.query ?? {})) {
-    url.searchParams.set(k, subst(String(v), args));
+    url.searchParams.set(k, s(String(v)));
   }
 
   const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(spec.headers ?? {})) headers[k] = subst(v, args);
+  for (const [k, v] of Object.entries(spec.headers ?? {})) headers[k] = s(v);
 
   const method = spec.method ?? "GET";
   let body: string | undefined;
   if (spec.body !== undefined && method !== "GET") {
-    body = JSON.stringify(substDeep(spec.body, args));
+    body = JSON.stringify(doSubst ? substDeep(spec.body, args) : spec.body);
     if (!Object.keys(headers).some((h) => h.toLowerCase() === "content-type")) {
       headers["Content-Type"] = "application/json";
     }

@@ -3,6 +3,8 @@ import {
   CashuProcessor,
   CvmServer,
   ExplicitGate,
+  RateLimiter,
+  SqliteGateStore,
   publishAnnouncement,
   secretKeyFrom,
   pubkeyHexOf,
@@ -29,6 +31,9 @@ interface Config {
   maxTimeoutMs: number;
   maxOutputBytes: number;
   jobDb: string;
+  gateDb: string;
+  rateCapacity: number;
+  rateRefillPerSec: number;
   announce: boolean;
   paymentMode: "none" | "cashu";
   cashuMintUrl: string;
@@ -47,6 +52,9 @@ function configFromEnv(env: Record<string, string | undefined>): Config {
     maxTimeoutMs: Number(env.MAX_TIMEOUT_MS ?? "60000"),
     maxOutputBytes: Number(env.MAX_OUTPUT_BYTES ?? "65536"),
     jobDb: env.JOB_DB ?? "/var/lib/loom/cvm-lambda/jobs.sqlite",
+    gateDb: env.GATE_DB ?? "/var/lib/loom/cvm-lambda/gate.sqlite",
+    rateCapacity: Number(env.RATE_CAPACITY ?? "10"),
+    rateRefillPerSec: Number(env.RATE_REFILL_PER_SEC ?? "1"),
     announce: (env.ANNOUNCE ?? "true") !== "false",
     paymentMode: (env.PAYMENT_MODE as Config["paymentMode"]) ?? "none",
     cashuMintUrl: env.CASHU_MINT_URL ?? "https://testnut.cashu.exchange",
@@ -104,8 +112,15 @@ function deriveOrderId(caller: string, args: Record<string, unknown>): string {
 export function buildTools(cfg: Config, jobs: JobManager): Tool[] {
   const gate =
     cfg.paymentMode === "cashu" && cfg.priceSats > 0
-      ? new ExplicitGate(new CashuProcessor({ mintUrl: cfg.cashuMintUrl }))
+      ? new ExplicitGate(
+          new CashuProcessor({ mintUrl: cfg.cashuMintUrl }),
+          new SqliteGateStore(cfg.gateDb),
+        )
       : undefined;
+  const limiter = new RateLimiter({
+    capacity: cfg.rateCapacity,
+    refillPerSec: cfg.rateRefillPerSec,
+  });
 
   const runCode: Tool = {
     definition: {
@@ -131,6 +146,7 @@ export function buildTools(cfg: Config, jobs: JobManager): Tool[] {
       },
     },
     handler: async (args, ctx) => {
+      limiter.assert(ctx.caller);
       if (!gate) return runOnce(cfg, args);
       const orderId = String(args.order_id ?? deriveOrderId(ctx.caller, args));
       return gate.gate({
@@ -161,6 +177,7 @@ export function buildTools(cfg: Config, jobs: JobManager): Tool[] {
       },
     },
     handler: (args, ctx) => {
+      limiter.assert(ctx.caller);
       const id = jobs.submit(ctx.caller, String(args.language ?? ""));
       void jobs.run(id, () => runOnce(cfg, args));
       return { job_id: id, status: "queued" };

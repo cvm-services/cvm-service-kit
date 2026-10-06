@@ -34,9 +34,12 @@
 
 ## Phase 2 — AI
 
-- [ ] NanoGPT wrapper (`chat`, `models`, `images`) — x402/lightning-l402 or key
-- [ ] PayPerQ wrapper (reuse fleet PPQ client)
-- [ ] Announcements + registry entries
+- [x] `src/openai.ts` — shared OpenAI-compatible client (chat/models)
+- [x] `services/_shared/ai.ts` — `buildAiTools` (chat/models/availability), paid chat
+- [x] `services/cvm-nanogpt/` — code + tests
+- [x] `services/cvm-ppq/` — code + tests (+ `balance` tool)
+- [ ] Live E2E — **blocked on funded `NANOGPT_API_KEY` / `PPQ_API_KEY`**
+- [ ] Announcements + registry entries (after live proof)
 
 ## Phase 3 — rates
 
@@ -53,9 +56,12 @@
 
 ## Phase 5 — M7 hardening (parallel)
 
-- [ ] Persist cvm-lambda order store (shared `orders.ts`)
+- [x] Persist the payment gate store — `SqliteGateStore` (kit) wired into
+      cvm-lambda; survives restarts / replay
+- [x] Per-payer rate limiting — `RateLimiter` (token bucket) wired into
+      cvm-lambda `run_code`/`submit_job`
 - [ ] Default-deny egress for `loomtap-*` + opt-in network tier
-- [ ] Admission queue + per-payer rate/concurrency limits
+- [ ] Admission queue + global concurrency cap
 - [ ] Vault secrets (provider nsec, treasury key); rotation runbook
 - [ ] Observability: health, counters, low-balance alerts, reconciliation
 - [ ] ADR + README + CI evidence
@@ -76,3 +82,5 @@
 | 2026-10-06 | Plan | PLAN.md + PROGRESS.md |
 | 2026-10-06 | Phase 0 | 59 tests pass, `tsc` clean (pricing/orders/http/lnwallet/l402/reseller) |
 | 2026-10-06 | Phase 1 | live `list_services` over Nostr → upstream sms4sats catalogue |
+| 2026-10-06 | Phase 2 | NanoGPT + PPQ wrappers, 73 tests pass, `tsc` clean |
+| 2026-10-06 | Phase 5 | durable gate store + rate limiter wired into cvm-lambda |
