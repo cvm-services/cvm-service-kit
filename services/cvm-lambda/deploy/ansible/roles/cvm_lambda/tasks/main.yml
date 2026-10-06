@@ -163,16 +163,16 @@
     timeout: 90
 
 # --- Control plane code -----------------------------------------------------
-- name: Check bun
-  ansible.builtin.stat:
-    path: "/home/{{ cvm_lambda_user }}/.bun/bin/bun"
-  register: cvm_bun
+- name: Check installed bun version
+  ansible.builtin.command: "/home/{{ cvm_lambda_user }}/.bun/bin/bun --version"
+  register: cvm_bun_ver
+  changed_when: false
+  failed_when: false
 
-- name: Install bun
-  when: not cvm_bun.stat.exists
+- name: Install bun {{ cvm_lambda_bun_version }}
+  when: cvm_bun_ver.rc != 0 or cvm_lambda_bun_version not in cvm_bun_ver.stdout
   ansible.builtin.shell:
-    cmd: "curl -fsSL https://bun.sh/install | bash"
-    creates: "/home/{{ cvm_lambda_user }}/.bun/bin/bun"
+    cmd: "curl -fsSL https://bun.sh/install | bash -s \"bun-v{{ cvm_lambda_bun_version }}\""
   args:
     executable: /bin/bash
 
@@ -181,17 +181,19 @@
     src: "{{ playbook_dir }}/../../../../"
     dest: "{{ cvm_lambda_repo_dir }}/"
     delete: true
+    checksum: true
     rsync_opts:
       - "--exclude=node_modules"
       - "--exclude=.git"
       - "--exclude=.artifacts"
       - "--exclude=*.sqlite"
+      - "--omit-dir-times"
   become: false
   register: cvm_sync
 
 - name: Install control-plane deps
   ansible.builtin.command:
-    cmd: "/home/{{ cvm_lambda_user }}/.bun/bin/bun install"
+    cmd: "/home/{{ cvm_lambda_user }}/.bun/bin/bun install --frozen-lockfile"
     chdir: "{{ cvm_lambda_repo_dir }}"
   become: false
   register: cvm_bun_install

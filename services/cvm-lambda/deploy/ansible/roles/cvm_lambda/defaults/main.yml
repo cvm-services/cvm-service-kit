@@ -2,6 +2,8 @@
 # cvm-lambda executor + control plane. All values pinned for reproducibility.
 
 cvm_lambda_user: debian
+# Pin bun so the remote lockfile handling matches the committed bun.lock.
+cvm_lambda_bun_version: "1.4.2"
 cvm_lambda_repo_dir: /home/debian/cvm-service-kit
 cvm_lambda_state_dir: /var/lib/loom
 cvm_lambda_socket: /run/loom/adapter.sock
