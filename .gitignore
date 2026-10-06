@@ -1,3 +1,6 @@
+# scratch
+.readme_head.md
+*.tmp
 node_modules/
 .artifacts/
 *.sqlite
