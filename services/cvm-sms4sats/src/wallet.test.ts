@@ -24,6 +24,8 @@ import { Sms4SatsClient } from "./upstream.ts";
 function depsFor(opts: {
   nwcUrl?: string;
   walletBalanceSats?: number;
+  /** Upstream client; defaults to an unreachable host. */
+  client?: Sms4SatsClient;
 }): { deps: SmsDeps; orders: SqliteOrderStore } {
   // Production shape: the treasury is built from walletFromEnv — real wallet
   // when NWC_URL is set, NO wallet otherwise (never a fake stand-in).
@@ -34,7 +36,7 @@ function depsFor(opts: {
   const treasury = new Treasury(wallet, { floorSats: 1000 });
   const orders = new SqliteOrderStore(":memory:");
   const deps: SmsDeps = {
-    client: new Sms4SatsClient({ baseUrl: "http://upstream.invalid" }),
+    client: opts.client ?? new Sms4SatsClient({ baseUrl: "http://upstream.invalid" }),
     wallet,
     treasury,
     orders,
@@ -61,6 +63,35 @@ function fakeWallet(balance: number) {
 
 const REAL_NWC_URI =
   "nostr+walletconnect://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?relay=wss%3A%2F%2Fwallet.example&secret=000102030405060708090a0b0c0d0e0f&encryption=nip44";
+
+/**
+ * An upstream that WOULD mint an order (402 quote) over the same fetchImpl
+ * seam tools.test.ts uses. The mint-guard tests must run against a reachable
+ * upstream: an unreachable one can never mint anything, so "no order exists"
+ * would pass vacuously regardless of the guard.
+ */
+function answeringClient(calls: { requestOrder: number }) {
+  const fetchImpl = async (url: string, init: any) => {
+    const method = init?.method ?? "GET";
+    if (method === "POST" && url.includes("/v2/l402/order")) {
+      calls.requestOrder++;
+      return {
+        status: 402,
+        ok: false,
+        headers: new Headers(),
+        text: async () =>
+          JSON.stringify({ macaroon: "mac", invoice: "lnbc50n1x", priceSats: 50, orderId: "up-1" }),
+      } as any;
+    }
+    return {
+      status: 404,
+      ok: false,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ error: "no route" }),
+    } as any;
+  };
+  return new Sms4SatsClient({ fetchImpl: fetchImpl as any });
+}
 
 interface RailRefusal {
   code: number;
@@ -97,18 +128,53 @@ describe("(a) unconfigured wallet — the paid path refuses rail_unavailable", (
   });
 
   test("an unconfigured service mints NO order (nothing half-sold)", async () => {
-    const { deps, orders } = depsFor({});
+    // Reachable upstream that WOULD answer a 402 quote — otherwise this test
+    // is vacuous: an unreachable host can never mint an order anyway.
+    const calls = { requestOrder: 0 };
+    const { deps, orders } = depsFor({ client: answeringClient(calls) });
     const tools = buildSmsTools(deps);
     const create = tools.find((t) => t.definition.name === "create_sms_order")!;
     const caller = "b".repeat(64);
     await refusalOf(() => Promise.resolve(create.handler({ service: "tg" }, { caller })));
     // No order id may exist for this caller+args: nothing was half-sold.
+    // Digest field order must mirror deriveOrderId exactly:
+    //   `${caller}\n${args.country}\n${args.service}\n${args.type ?? "receive-sms"}`
+    // — for handler({service:"tg"}) that is `caller\nundefined\ntg\nreceive-sms`.
     const derived = createHash("sha256")
-      .update(`${caller}\ntg\nundefined\nreceive-sms`)
+      .update(`${caller}\nundefined\ntg\nreceive-sms`)
       .digest("hex")
       .slice(0, 32);
     expect(orders.get(derived)).toBeNull();
-    expect(orders.get("tg")).toBeNull();
+    // And the upstream was never even asked for a quote: the guard fires
+    // BEFORE requestOrder, so no order can be half-sold on the upstream side.
+    expect(calls.requestOrder).toBe(0);
+  });
+
+  test("control: the same upstream DOES mint when the rail is configured", async () => {
+    // Non-vacuity control for the test above: with a real wallet selected,
+    // the same answering client mints an order and requestOrder IS called.
+    // This proves the fixture can be won — "mints NO order" above fails on
+    // guard placement, not on an upstream that could never mint anything.
+    const calls = { requestOrder: 0 };
+    const { deps, orders } = depsFor({
+      nwcUrl: REAL_NWC_URI,
+      walletBalanceSats: 250_000,
+      client: answeringClient(calls),
+    });
+    const tools = buildSmsTools(deps);
+    const create = tools.find((t) => t.definition.name === "create_sms_order")!;
+    const caller = "c".repeat(64);
+    // Unpaid caller: the gate demands payment AFTER the order is minted —
+    // PaymentRequiredError is expected and swallowed (refusalOf rethrows it).
+    await refusalOf(() =>
+      Promise.resolve(create.handler({ service: "tg", country: "US" }, { caller }))
+    ).catch(() => {});
+    const derived = createHash("sha256")
+      .update(`${caller}\nUS\ntg\nreceive-sms`)
+      .digest("hex")
+      .slice(0, 32);
+    expect(calls.requestOrder).toBe(1);
+    expect(orders.get(derived)?.status).toBe("pending_payment");
   });
 });
 
