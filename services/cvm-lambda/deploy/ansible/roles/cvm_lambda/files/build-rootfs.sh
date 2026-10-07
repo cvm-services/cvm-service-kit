@@ -139,67 +139,20 @@ in_chroot '
         build-essential \
         jq vim nano \
         ca-certificates \
-        ffmpeg \
         golang \
         rustc cargo \
         \
         socat \
         init \
         systemd \
-        openssh-server \
         iproute2 \
         iputils-ping \
         dnsutils
 '
 
-# Install Docker inside the rootfs
-echo "=== Installing Docker ==="
-in_chroot '
-    set -euxo pipefail
-    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-    sh /tmp/get-docker.sh
-    rm /tmp/get-docker.sh
-    # Docker is installed but NOT started: it is heavy and pulls
-    # network-online.target -> systemd-networkd-wait-online, which blocks boot
-    # in a vsock-only guest. Enable it only if a workload requires nested docker.
-    systemctl disable docker containerd 2>/dev/null || true
-    chmod 666 /var/run/docker.sock || true
-    mkdir -p /etc/systemd/system/docker.service.d
-    cat > /etc/systemd/system/docker.service.d/override.conf << EOF
-[Service]
-ExecStartPost=/bin/chmod 666 /var/run/docker.sock
-EOF
-'
-
-# Install ngit
-echo "=== Installing ngit ==="
-in_chroot '
-    set -euxo pipefail
-    curl -Ls https://ngit.dev/install.sh | bash
-'
-
-# Install nak
-echo "=== Installing nak ==="
-in_chroot '
-    set -euxo pipefail
-    export HOME=/root
-    export GOPATH=$HOME/go
-    export PATH=$PATH:$GOPATH/bin
-    go install github.com/fiatjaf/nak@v0.18.1
-    cp $GOPATH/bin/nak /usr/local/bin/
-'
-
-# Install act
-echo "=== Installing act ==="
-in_chroot '
-    set -euxo pipefail
-    curl --proto "=https" --tlsv1.2 -sSf https://raw.githubusercontent.com/nektos/act/master/install.sh | bash
-    mkdir -p /etc/skel
-    echo "-P ubuntu-latest=catthehacker/ubuntu:act-latest" > /etc/skel/.actrc
-'
-
-# No `docker pull` here: there is no daemon inside a chroot. act pulls its
-# image on first use in the guest.
+# Trimmed for cvm-lambda: no Docker/ffmpeg/ngit/nak/act. The lambda only needs
+# python3/node/bash/go/rustc; dropping the rest shrinks the image (faster COW
+# recycle, less disk) and shortens the build. Re-add here if a workload needs it.
 
 # Install the vsock agent
 echo "=== Installing loom-vsock-agent ==="
