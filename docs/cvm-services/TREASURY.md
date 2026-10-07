@@ -96,6 +96,9 @@ change. Verified against `testnut.cashu.exchange`: `state=PAID`,
 - [x] `services/_shared/wallet.ts` factory (nwc | cashu | fake) + tests
 - [x] wired into `cvm-sms4sats` (TREASURY_BACKEND/NWC_URL/CASHU_TREASURY_MINT_URL/CASHU_WALLET_SEED)
 - [x] `/health` reports `treasury_backend` + balance
+- [x] end-to-end with the **Cashu treasury**: `e2e-cashu-mock.ts` — the mock
+      upstream issues a real testnut BOLT11, the wrapper's Cashu treasury melts
+      it (`state=PAID`, preimage) → `{"status":"completed","code":"1234"}`
 
 ### Part D — Live path  [!] blocked
 - [ ] funded NWC or real-mint Cashu wallet (operator)
