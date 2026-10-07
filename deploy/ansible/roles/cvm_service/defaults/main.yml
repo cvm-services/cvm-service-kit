@@ -4,12 +4,12 @@
 # the pinned-deploy change (a synced copy with no .git has no SHA and no
 # rollback).
 #
-# The playbook pins `cvm_kit_version` to a full SHA in production. A tag or
-# full SHA is the reproducible setting: at a SHA the checkout is exact and
-# cannot drift; at a moving ref every deploy is whatever the ref points at
-# that day.
+# The playbook pins `cvm_kit_version` to a full SHA in production. The default
+# here is ALSO a full SHA (never a moving ref): at a SHA the checkout is exact
+# and cannot drift; at a moving ref every deploy is whatever the ref points at
+# that day, which defeats reproducibility.
 cvm_kit_repo: "https://github.com/cvm-services/cvm-service-kit.git"
-cvm_kit_version: "main"
+cvm_kit_version: "323851345422d385070327241b9ef6ad08fd0bf3" # pr/pinned-deploy head; re-pin to the merge SHA after PR #8 lands
 
 # Required per invocation:
 #   cvm_service_name   — e.g. cvm-nanogpt (also the systemd unit + /etc dir)

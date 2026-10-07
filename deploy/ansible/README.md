@@ -28,8 +28,9 @@ rollback; "what is running?" was only answerable by SSH archaeology.
 
 - `cvm_kit_version: <full SHA>` (or tag) — the reproducible setting: the
   checkout is exactly that commit, and re-running the playbook is idempotent.
-- The playbook pins `main` while the wrappers are in staging flip-mode; move
-  it to a tag/SHA for anything announced publicly.
+- Both the role default and the playbook pin a **full SHA** (never a moving
+  ref). After this PR merges, re-pin to the merge SHA; until then the pin is
+  the PR branch head, which contains the health commit/ref wiring.
 - **Rollback is one variable change**: set `cvm_kit_version` to the previous
   SHA (or tag) and re-run the playbook. The checkout resets (`force: true`),
   the unit restarts, and the health endpoint reports the old commit.

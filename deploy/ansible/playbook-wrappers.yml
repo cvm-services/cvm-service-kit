@@ -39,7 +39,7 @@
     # Pin the deployed source. A full SHA (or tag) makes every deploy
     # reproducible; "main" deploys whatever the branch points at that day.
     # Rollback = set this to the previous SHA and re-run.
-    cvm_kit_version: "b523c9c90f3aac4a8acf394ada78ec42101e936d" # github/main, 2026-10-07
+    cvm_kit_version: "323851345422d385070327241b9ef6ad08fd0bf3" # pr/pinned-deploy head (flip-pin until merged, then re-pin to the merge SHA)
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts

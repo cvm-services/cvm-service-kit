@@ -37,6 +37,11 @@
   args:
     executable: /bin/bash
 
+- name: Ensure git is present (checkout + read-back need it)
+  ansible.builtin.package:
+    name: git
+    state: present
+
 - name: Is the deploy dir already a git checkout?
   ansible.builtin.stat:
     path: "{{ cvm_service_repo_dir }}/.git"
@@ -115,9 +120,10 @@
     recurse: true
   when: cvm_checkout.changed
 
-# Re-run ownership fix on every role run: chown -R only fires when the
-# checkout changed, but files created later (bun install as the service user,
-# .deployed-sha, ...) can leave root-owned files behind on first deploy.
+# Ownership note: chown -R fires only when the checkout changed. Files created
+# later are already service-user owned: bun install runs as the service user
+# (become: false) and .deployed-sha/.deployed-ref are copied with explicit
+# owner/group, so no root-owned stragglers are expected on re-runs.
 
 - name: Install dependencies (frozen lockfile)
   ansible.builtin.command:
