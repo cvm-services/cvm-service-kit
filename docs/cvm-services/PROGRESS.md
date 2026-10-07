@@ -111,3 +111,4 @@
 | 2026-10-06 | Phase 5 | durable gate store + rate limiter wired into cvm-lambda |
 | 2026-10-06 | Phase 0/5 | generic `cvm_service` Ansible role; wrappers deployed staging; egress deny; admission queue |
 | 2026-10-06 | ops | adapter recycle fix (vsock cleanup) verified with max_age=0; executor 4/4 PASS at default |
+| 2026-10-06 | Treasury | `CashuLnWallet` + proof store; mock L402 harness; wallet factory; full pipeline over CVM → `code=1234` (see `TREASURY.md`) |

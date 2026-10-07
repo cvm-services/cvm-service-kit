@@ -1,0 +1,8 @@
+[Unit]
+Description={{ cvm_service_name }} health check (liveness / low-treasury)
+After={{ cvm_service_name }}.service
+
+[Service]
+Type=oneshot
+# Fails (non-zero) when /health status != ok, surfacing low_treasury / unconfigured.
+ExecStart=/bin/sh -c 'curl -fsS http://127.0.0.1:{{ cvm_service_health_port }}/health | grep -q "\"status\":\"ok\""'

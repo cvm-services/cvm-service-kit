@@ -12,5 +12,7 @@ export * from "./pricing.ts";
 export * from "./orders.ts";
 export * from "./http.ts";
 export * from "./lnwallet.ts";
+export * from "./proof-store.ts";
+export * from "./cashu-wallet.ts";
 export * from "./l402.ts";
 export * from "./reseller.ts";

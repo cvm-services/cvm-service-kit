@@ -15,3 +15,7 @@ cvm_bun_version: "1.4.2"
 #   cvm_service_server_key — pin SERVER_SECRET_KEY (else generated once)
 cvm_service_config: {}
 cvm_service_after: []
+# Secrets templated into /etc/<name>/secrets.env (0600). Source from the vault.
+cvm_service_secrets: {}
+# Optional loopback health port for the low-balance / liveness timer.
+cvm_service_health_port: 0

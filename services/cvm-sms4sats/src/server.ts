@@ -2,18 +2,15 @@ import {
   CashuProcessor,
   CvmServer,
   ExplicitGate,
-  FakeLnWallet,
-  NwcLnWallet,
   SqliteOrderStore,
   Treasury,
   markupForMargin,
   publishAnnouncement,
   pubkeyHexOf,
   secretKeyFrom,
-  type LnWallet,
-  type PaymentProcessor,
 } from "../../../src/index.ts";
 import { startHealthServer } from "../../_shared/health.ts";
+import { makeWallet } from "../../_shared/wallet.ts";
 import { Sms4SatsClient } from "./upstream.ts";
 import { buildSmsTools } from "./tools.ts";
 
@@ -65,18 +62,18 @@ async function main() {
   const cfg = configFromEnv(process.env);
   const sk = secretKeyFrom(cfg.secretKey);
 
-  const wallet: LnWallet = cfg.nwcUrl ? new NwcLnWallet(cfg.nwcUrl) : new FakeLnWallet();
-  if (!cfg.nwcUrl) {
-    console.error("[cvm-sms4sats] WARNING: no NWC_URL — using FakeLnWallet (dev only)");
+  const { wallet, backend } = makeWallet(process.env);
+  console.error(`[cvm-sms4sats] treasury backend: ${backend}`);
+  if (backend === "fake") {
+    console.error("[cvm-sms4sats] WARNING: FakeLnWallet — dev only");
   }
 
   const treasury = new Treasury(wallet, { floorSats: cfg.floorSats });
   const orders = new SqliteOrderStore(cfg.orderDb);
-  const processor: PaymentProcessor =
+  const gate =
     cfg.paymentMode === "cashu"
-      ? new CashuProcessor({ mintUrl: cfg.cashuMintUrl })
-      : (new FakeLnWallet() as unknown as PaymentProcessor);
-  const gate = new ExplicitGate(processor);
+      ? new ExplicitGate(new CashuProcessor({ mintUrl: cfg.cashuMintUrl }))
+      : undefined;
   const client = new Sms4SatsClient({ baseUrl: cfg.sms4satsBase });
 
   const tools = buildSmsTools({
@@ -105,6 +102,7 @@ async function main() {
       port: healthPort,
       report: async () => ({
         status: (await treasury.canSpend(cfg.minPriceSats)) ? "ok" : "low_treasury",
+        treasury_backend: backend,
         treasury_balance_sats: await treasury.balanceSats(),
       }),
     });

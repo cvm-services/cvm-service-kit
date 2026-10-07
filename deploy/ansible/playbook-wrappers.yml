@@ -1,20 +1,36 @@
 ---
 # Deploy the ContextVM service wrappers.
 #
-# Staging note: ANNOUNCE=false until the treasury NWC wallet + upstream keys are
-# supplied. Flip to "true" (and set the secrets) to publish to CEP-6 discovery.
+# Staging note: ANNOUNCE=false until the treasury (NWC/real ecash) + upstream
+# keys are supplied. Flip to "true" (and set the secrets) to publish via CEP-6.
 #
 #   cd deploy/ansible
 #   ansible-playbook playbook-wrappers.yml
+#
+# Real treasury (pass from the vault, e.g. -e @vault-treasury.yml):
+#   sms_treasury_backend: nwc | cashu
+#   sms_nwc_url: "nostr+walletconnect://…"
+#   sms_cashu_treasury_mint_url: "https://mint.minibits.cash/Bitcoin"
+#   sms_cashu_seed: "<64-hex>"
 - name: Deploy ContextVM service wrappers
   hosts: executor
   become: true
   vars:
     common_relays: "wss://nostr.mom,wss://relay.primal.net,wss://nos.lol,wss://relay2.contextvm.org,wss://relay2.orangesync.tech"
+    sms_treasury_backend: "fake"
+    sms_nwc_url: ""
+    sms_cashu_treasury_mint_url: ""
+    sms_cashu_seed: ""
+    sms_secrets:
+      NWC_URL: "{{ sms_nwc_url }}"
+      CASHU_TREASURY_MINT_URL: "{{ sms_cashu_treasury_mint_url }}"
+      CASHU_WALLET_SEED: "{{ sms_cashu_seed }}"
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts
         state_dir: /var/lib/loom/cvm-sms4sats
+        health_port: 8781
+        secrets: "{{ sms_secrets }}"
         config:
           RELAYS: "{{ common_relays }}"
           ANNOUNCE: "false"
@@ -22,14 +38,17 @@
           SERVICE_CLASS: sms
           PAYMENT_MODE: cashu
           CASHU_MINT_URL: https://testnut.cashu.exchange
+          TREASURY_BACKEND: "{{ sms_treasury_backend }}"
           MARGIN: "0.2"
           MIN_PRICE_SATS: "1"
           TREASURY_FLOOR_SATS: "1000"
           ORDER_DB: /var/lib/loom/cvm-sms4sats/orders.sqlite
+          CASHU_WALLET_DB: /var/lib/loom/cvm-sms4sats/cashu.sqlite
           HEALTH_PORT: "8781"
       - name: cvm-nanogpt
         script: services/cvm-nanogpt/src/server.ts
         state_dir: /var/lib/loom/cvm-nanogpt
+        health_port: 8782
         config:
           RELAYS: "{{ common_relays }}"
           ANNOUNCE: "false"
@@ -45,6 +64,7 @@
       - name: cvm-ppq
         script: services/cvm-ppq/src/server.ts
         state_dir: /var/lib/loom/cvm-ppq
+        health_port: 8783
         config:
           RELAYS: "{{ common_relays }}"
           ANNOUNCE: "false"
@@ -66,4 +86,6 @@
         cvm_service_script: "{{ item.script }}"
         cvm_service_config: "{{ item.config }}"
         cvm_service_state_dir: "{{ item.state_dir }}"
+        cvm_service_health_port: "{{ item.health_port }}"
+        cvm_service_secrets: "{{ item.secrets | default({}) }}"
       loop: "{{ wrappers }}"
