@@ -57,6 +57,12 @@ export const REFUSALS = {
     reason: "upstream_error",
     remedy: "The upstream service failed; retry later.",
   },
+  rail_unavailable: {
+    code: -32006,
+    reason: "rail_unavailable",
+    remedy:
+      "The rail this tool needs is not configured on this host; the operator must enable it. No substitute or fabricated value is ever returned.",
+  },
 } as const satisfies Record<string, RefusalSpec>;
 
 export type RefusalReason = keyof typeof REFUSALS;
