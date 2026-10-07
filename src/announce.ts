@@ -87,7 +87,9 @@ function inputTags(opts: AnnounceOptions): string[][] {
 }
 
 function resolveTier(opts: AnnounceOptions): string | undefined {
-  if (opts.tier) return opts.tier;
+  // The tier is COMPUTED from the declared fields, never supplied: a caller
+  // that could pass its own tier could understate what the service collects,
+  // which is the one lie a reader cannot detect (CEP-draft-0001 P15).
   if (opts.requiredInputs === undefined && opts.optionalInputs === undefined) {
     return undefined; // unknown appetite: publish no tier tag
   }
