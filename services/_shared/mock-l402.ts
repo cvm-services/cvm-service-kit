@@ -7,6 +7,11 @@ export interface MockL402Options {
   /** Bind port; 0 (default) picks a free port (tests). */
   port?: number;
   hostname?: string;
+  /**
+   * Optional: return a real BOLT11 (e.g. a Cashu mint quote) as the 402
+   * invoice, so a Cashu-backed treasury can melt it in an end-to-end test.
+   */
+  invoiceFactory?: () => Promise<{ invoice: string; priceSats: number }>;
 }
 
 export interface MockL402 {
@@ -43,9 +48,16 @@ export function startMockL402(opts: MockL402Options = {}): MockL402 {
       if (req.method === "POST" && url.pathname === "/v2/l402/order") {
         const orderId = "ord-" + randomUUID();
         orders.set(orderId, { paid: false });
+        let invoice = `lnbc${priceSats}n1mock`;
+        let price = priceSats;
+        if (opts.invoiceFactory) {
+          const made = await opts.invoiceFactory();
+          invoice = made.invoice;
+          price = made.priceSats;
+        }
         return Response.json(
-          { macaroon, invoice: `lnbc${priceSats}n1mock`, priceSats, orderId },
-          { status: 402, headers: { "WWW-Authenticate": `L402 macaroon="${macaroon}", invoice="lnbc${priceSats}n1mock"` } },
+          { macaroon, invoice, priceSats: price, orderId },
+          { status: 402, headers: { "WWW-Authenticate": `L402 macaroon="${macaroon}", invoice="${invoice}"` } },
         );
       }
 
