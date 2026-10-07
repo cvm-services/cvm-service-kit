@@ -12,6 +12,7 @@ import {
   type PaymentProcessor,
 } from "../../../src/index.ts";
 import { startHealthServer } from "../../_shared/health.ts";
+import { resolveDeployedCommit, resolveDeployedRef } from "../../_shared/start.ts";
 import { Sms4SatsClient } from "./upstream.ts";
 import { buildSmsTools, treasuryHealthReport, type SmsDeps } from "./tools.ts";
 
@@ -118,6 +119,8 @@ async function main() {
     startHealthServer({
       service: "cvm-sms4sats",
       port: healthPort,
+      commit: resolveDeployedCommit(process.env),
+      ref: resolveDeployedRef(process.env),
       report: async () => treasuryHealthReport(treasury, cfg.minPriceSats, sel.rail),
     });
   }
