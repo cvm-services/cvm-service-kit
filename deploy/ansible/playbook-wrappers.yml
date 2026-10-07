@@ -57,6 +57,24 @@
           DEFAULT_MODEL: deepseek/deepseek-v3.2
           GATE_DB: /var/lib/loom/cvm-ppq/gate.sqlite
           HEALTH_PORT: "8783"
+      - name: cvm-2fiat
+        script: services/cvm-2fiat/src/server.ts
+        state_dir: /var/lib/loom/cvm-2fiat
+        # ANNOUNCE stays false until the announce card says go. Secret values
+        # (SERVER_SECRET_KEY, OWNER_NPUB_HEX, ADAPTER_URL) are written ONCE by
+        # the role's secret.env template, sourced from the fleet vault —
+        # /etc/cvm-2fiat/secret.env, mode 0600. Never put a value here.
+        config:
+          RELAYS: "{{ common_relays }}"
+          ANNOUNCE: "false"
+          ANNOUNCE_D: cvm-2fiat-01
+          SERVICE_CLASS: payment-rail
+          PAYMENT_MODE: "none"
+          PRICE_BALANCE_SATS: "0"
+          GATE_DB: /var/lib/loom/cvm-2fiat/gate.sqlite
+          RATE_CAPACITY: "10"
+          RATE_REFILL_PER_SEC: "1"
+          HEALTH_PORT: "8784"
   tasks:
     - name: Deploy each wrapper
       ansible.builtin.include_role:
