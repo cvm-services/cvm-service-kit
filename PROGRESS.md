@@ -1,29 +1,34 @@
-# cvm-2fiat task t_3257a720 — progress map
+# PROGRESS — t_6b0769fd (pr/real-wallet)
 
-Branch `pr/cvm-2fiat` (remote: github = cvm-services/cvm-service-kit, origin = ngit mirror).
-Deliverable: `services/cvm-2fiat/` rail-only service. Card body + manager comment = the spec.
+Branch: pr/real-wallet, base = github/pr/cvm-2fiat @ c6cc3f3 (the head of the
+services stack: services/ + deploy/cvm_service + src/refusals.ts all present).
+Baseline: `bun test src services` = 92 pass / 0 fail (2026-10-07).
 
-## Facts gathered (READ-ONLY phase, no code yet)
-- kit layout: `src/` lib, `services/<name>/src/{server,tools,...}`, `services/_shared/start.ts` (startService bootstrap).
-- Announce API (old path, used by every service): `publishAnnouncement(server, AnnounceOptions, serverInfo)` — kind 11316/11317.
-  - FIELD-LESS service: pass `requiredInputs: []` AND `optionalInputs: []` → emits only `t=cvm:req:none` + tier `none`.
-  - NOTE for card body compliance ("no tier tag for a field-less service"): emitting `cvm:tier:none` is what AnnounceOptions does with both arrays []. The body says "do not carry a tier tag". Use `emitAnnouncementTags` (AnnounceInput with NO required/optional at all) if a no-tier-tag emission is required — check which path satisfies the reader contract (vocab.ts: absent req/opt = unclassified, tier null, no tag).
-- Money rule: `ExplicitGate.gate()` from src/payment.ts — paid path must be downstream of gate(). Free tools = no gate.
-- Refusal codes: src/refusals.ts (payment_required, rail_unavailable etc.) — reuse, don't invent.
-- docs tool pattern: nadanada (python) serves docs/cvm/llms.txt verbatim via a `docs` tool. No TS service in this kit has a docs tool yet — cvm-2fiat adds one; pattern = embed the contract text and return it verbatim.
-- payment.quote reference design: ~/worktrees/mcp-cashu-exchange/packages/plugin-pay-2fiat/src/index.ts + docs/PAYMENT.md (own-card hand-off wording — reuse, don't reinvent).
-- Local adapter interface (private repo, defined, NOT built): ~/repos/2fiat-local-adapter/src/adapter.py — balance() -> {currency, amount, as_of}; capabilities() -> {card_present, can_authorize:false, needs_human_3ds:true, adapter:"local"}. The service codes against this interface, stub included, labelled.
-- 2fiat surface report: ~/reports/research/2fiat-surface-2026-10-07.md (issuer portal; no authorize endpoint; PAN behind emailed OTP).
-- Tests: `bun test src services` (bun) + deno tests in tests/ (deno test --allow-read tests/). CI runs both.
-- No credentials anywhere. Env var NAMES only. Deploy: parameterized role cvm_service; /etc/cvm-2fiat/{config,secret}.env.
+## Findings
+- Fake wallet seam: services/cvm-sms4sats/src/server.ts:68
+  `cfg.nwcUrl ? new NwcLnWallet(cfg.nwcUrl) : new FakeLnWallet()` + WARNING log.
+- Health/availability lie: server.ts:107-108 reports treasury_balance_sats from
+  treasury.balanceSats() -> FakeLnWallet -> 1,000,000 fabricated; same lie in
+  tools.ts availability handler (services/cvm-sms4sats/src/tools.ts:41-43).
+- Real wallet exists: src/lnwallet.ts NwcLnWallet (NIP-47 payInvoice/makeInvoice/balanceSats).
+- rail_unavailable exists: src/refusals.ts:60 (code -32006, CvmRefusalError, refuse()).
+- Ansible role: deploy/ansible/roles/cvm_service — secret.env.j2 is FIRST-RUN-ONLY
+  (`when: not cvm_secret_stat.stat.exists`), so NWC_URL could never land on an
+  already-deployed host. Unit stays secret-free (2x EnvironmentFile). mode 0600 OK.
+- No wallet selection unit exists anywhere (neither service tests nor src tests).
 
-## Plan (TDD)
-1. RED: services/cvm-2fiat/src/*.test.ts — (a) unpaid call never reaches adapter (owner balance is free in this service… NO — card body says card.balance is owner-only; the MONEY RULE applies to any paid path; balance is owner-gated not paid) — reread: tests required are (a) unpaid call never reaches balance/adapter, meaning IF a paid path exists it must sit behind the gate; (b) non-owner pubkey refused before any work; (c) no PAN/CVV-shaped value in any tool response; (d) refusal list present in announced content + docs output.
-2. GREEN: implement service files.
-3. Verify: bun run test; bun run typecheck; deno test + deno check.
-4. Commit, push github + ngit (pr/ prefix required), open PR, evidence in PR body.
-5. Cross-family review request.
-
-## Status log
-- [run 86] read-only recon complete; plan set; no files written yet.
-- [run 87] RED → GREEN → shipped. 5 commits on pr/cvm-2fiat (7cd3e5b RED suite, af05bae rail_unavailable, a10c218 service core, 8b1c16c server+live harness, c9daedf deploy wiring). Verified: bun 92/92 pass, tsc clean, deno 24 pass + check clean, credscan CLEAN, live harness LIVE OK over relay2.contextvm.org. Dual push verified: github + ngit both at c9daedf. PR #5 open, CI bun+deno green. Refusal list rendered by docs tool confirmed in PR body. Announce step waits for the announce card (ANNOUNCE=false default).
+## Plan
+1. src/treasury-env.ts: walletFromEnv(env) -> {wallet?: LnWallet, real: boolean}
+   (undefined when NWC_URL unset; NO FakeLnWallet substitute in production path).
+2. RED tests: services/cvm-sms4sats/src/wallet.test.ts
+   (a) unconfigured -> paid tool refuses rail_unavailable; (b) health/availability
+   payload has no fabricated balance (rail: "nwc", status rail_unavailable);
+   (c) configured -> real balance surfaces; paid tool proceeds past the rail check.
+3. GREEN: server.ts + tools.ts use walletFromEnv; Treasury with no wallet refuses
+   rail_unavailable on balanceSats/canSpend/assertCanSpend; tools refusal guard
+   before gate.gate; availability reports balance only when real.
+4. Ansible: NWC_URL via secret.env.j2 (fleet vault -> group vars / --extra-vars,
+   never a repo value), write-if-changed + mode 0600 + restart wiring; ansible.cfg
+   vars_plugins stage; role README secret sourcing note.
+5. Dual push (github + ngit), PR with RED/GREEN output + Ansible diff, cross-family
+   review, then kanban_complete (releases child t_968d7179 announce card).

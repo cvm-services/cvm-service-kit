@@ -12,6 +12,7 @@ export * from "./pricing.ts";
 export * from "./orders.ts";
 export * from "./http.ts";
 export * from "./lnwallet.ts";
+export * from "./treasury-env.ts";
 export * from "./l402.ts";
 export * from "./reseller.ts";
 export * from "./vocab.ts";
