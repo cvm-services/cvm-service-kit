@@ -77,7 +77,7 @@ async function main() {
   // Real wallet or NO wallet — never a fake one in production. With no rail
   // configured the paid path refuses rail_unavailable and availability/health
   // report the rail as unavailable instead of a fabricated balance.
-  const sel = walletFromEnv(process.env);
+  const sel = walletFromEnv({ NWC_URL: cfg.nwcUrl });
   if (!sel.real) {
     console.error(
       "[cvm-sms4sats] WARNING: no NWC_URL — treasury rail unavailable; paid tools will refuse rail_unavailable",
