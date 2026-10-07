@@ -268,9 +268,20 @@ export class CvmServer {
     await Promise.all(
       this.relays.map((r) =>
         Promise.race([
-          r.publish(event).catch((e: any) => {
-            this.log(`${errPrefix}: ${e?.message ?? e}`);
-          }),
+          // async IIFE, NOT `r.publish().catch(...)`: a publish() that throws
+          // SYNCHRONOUSLY (before returning a promise) would escape a plain
+          // `.catch` chain, reject this Promise.all and starve every other
+          // relay — the very failure this method exists to prevent. The IIFE
+          // converts both sync throws and async rejections into one caught,
+          // logged path. (`Promise.resolve(r.publish(...))` would NOT fix it:
+          // the argument is still evaluated before the wrapper exists.)
+          (async () => {
+            try {
+              await r.publish(event);
+            } catch (e: any) {
+              this.log(`${errPrefix}: ${e?.message ?? e}`);
+            }
+          })(),
           new Promise<void>((resolve) =>
             setTimeout(() => {
               this.log(`${errPrefix}: timeout after ${timeoutMs}ms`);

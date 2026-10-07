@@ -243,5 +243,15 @@ describe("publish: a never-answering relay must not starve a healthy one", () =>
     expect(logs.filter((l) => l.includes("publish")).length).toBe(2);
     expect(healthy.length).toBe(2);
   });
+
+  test("a SYNCHRONOUSLY-throwing publish is caught and does not starve the sibling (both paths)", async () => {
+    const { server, healthy, logs } = await startedPair(() => {
+      throw new Error("sync boom"); // throws before a promise ever exists
+    });
+    await server.publish({ kind: 1, content: "y", tags: [] });
+    await (server as any).sendGiftWrapped({ id: 2 }, RECIPIENT_PK);
+    expect(logs.filter((l) => l.includes("sync boom")).length).toBe(2);
+    expect(healthy.length).toBe(2);
+  });
 });
 
