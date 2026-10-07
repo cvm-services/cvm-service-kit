@@ -16,7 +16,8 @@ export interface SmsDeps {
   treasury: Treasury;
   orders: OrderStore;
   pricing: PricingConfig;
-  gate: ExplicitGate;
+  /** Omit to run in free mode (no client payment gate). */
+  gate?: ExplicitGate;
   poll?: { intervalMs?: number; attempts?: number };
 }
 
@@ -129,29 +130,32 @@ export function buildSmsTools(d: SmsDeps): Tool[] {
       await d.treasury.assertCanSpend(order.costSats ?? 0);
       const upstream = JSON.parse(order.upstreamRef!);
 
+      const run = async () => {
+        d.treasury.recordSpend(order!.costSats ?? 0);
+        d.orders.update(orderId, { status: "fulfilling" });
+        const res = await d.client.payAndPoll(
+          upstream.orderId,
+          { macaroon: upstream.macaroon, invoice: upstream.invoice },
+          d.wallet,
+          d.poll,
+        );
+        const done = res?.status === "completed" || res?.status === "code_received";
+        d.orders.update(orderId, {
+          status: done ? "fulfilled" : "failed",
+          resultJson: JSON.stringify(res),
+          error: done ? null : (res?.status ?? "unknown"),
+        });
+        return res;
+      };
+
+      if (!d.gate) return run();
       return d.gate.gate({
         tool: "create_sms_order",
         caller: ctx.caller,
         amountSats: order.priceSats,
         orderId,
         proof: typeof args.cashu_token === "string" ? args.cashu_token : undefined,
-        run: async () => {
-          d.treasury.recordSpend(order!.costSats ?? 0);
-          d.orders.update(orderId, { status: "fulfilling" });
-          const res = await d.client.payAndPoll(
-            upstream.orderId,
-            { macaroon: upstream.macaroon, invoice: upstream.invoice },
-            d.wallet,
-            d.poll,
-          );
-          const done = res?.status === "completed" || res?.status === "code_received";
-          d.orders.update(orderId, {
-            status: done ? "fulfilled" : "failed",
-            resultJson: JSON.stringify(res),
-            error: done ? null : (res?.status ?? "unknown"),
-          });
-          return res;
-        },
+        run,
       });
     },
   };

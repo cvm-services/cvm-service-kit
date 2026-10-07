@@ -72,11 +72,10 @@ async function main() {
 
   const treasury = new Treasury(wallet, { floorSats: cfg.floorSats });
   const orders = new SqliteOrderStore(cfg.orderDb);
-  const processor: PaymentProcessor =
+  const gate =
     cfg.paymentMode === "cashu"
-      ? new CashuProcessor({ mintUrl: cfg.cashuMintUrl })
-      : (new FakeLnWallet() as unknown as PaymentProcessor);
-  const gate = new ExplicitGate(processor);
+      ? new ExplicitGate(new CashuProcessor({ mintUrl: cfg.cashuMintUrl }))
+      : undefined;
   const client = new Sms4SatsClient({ baseUrl: cfg.sms4satsBase });
 
   const tools = buildSmsTools({
