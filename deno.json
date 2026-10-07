@@ -6,6 +6,9 @@
     "test": "deno test --allow-read tests/",
     "check": "deno check src/mod.ts"
   },
+  "compilerOptions": {
+    "lib": ["esnext", "deno.ns", "deno.window"]
+  },
   "fmt": {
     "lineWidth": 100,
     "exclude": ["README.md", "vocab/"]

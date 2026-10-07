@@ -7,7 +7,7 @@
   "main": "src/index.ts",
   "license": "MIT",
   "scripts": {
-    "test": "bun test",
+    "test": "bun test src services",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
