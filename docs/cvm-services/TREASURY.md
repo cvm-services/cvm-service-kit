@@ -76,9 +76,15 @@ alert on `/health` `low_treasury`; funding runbook; docs updates.
 
 ### Part A — CashuLnWallet  ✅
 - [x] `src/proof-store.ts` (Memory + SQLite) + tests
-- [x] `src/cashu-wallet.ts` `payInvoice`/`makeInvoice`/`balanceSats` + unit tests
-- [ ] opt-in integration test vs a live mint (needs a funded wallet)
+- [x] `src/cashu-wallet.ts` `payInvoice`/`makeInvoice`/`balanceSats`/`fund` + unit tests
+- [x] opt-in integration test vs a live mint (`MINT_INTEGRATION=1`)
 - [x] exported; tsc + tests green
+
+**Melt fix:** the first cut split an exact sum via `wallet.send` then melted it,
+which failed with `insufficient_inputs` because the mint's input fee scales with
+the number of proofs. Correct NUT-05 flow: submit enough proofs and take the
+change. Verified against `testnut.cashu.exchange`: `state=PAID`,
+`preimage=0fd0…`, change returned.
 
 ### Part B — Mock L402 harness  ✅
 - [x] `services/_shared/mock-l402.ts` (+ standalone entrypoint)
@@ -125,7 +131,18 @@ BOLT11 refund invoice we cannot currently mint.
 ## Open verification
 - [x] cashu-ts v2 melt preimage field → `MeltProofsResponse.quote.payment_preimage`
 - [x] proof-store API shape → custom (SQLite) store
-- [ ] fakewallet melt preimage behavior → resolve on the live test
+- [x] fakewallet melt preimage → testnut (Nutshell FakeWallet) returns a real
+      preimage on melt → a fakewallet mint can settle the L402 handshake
+
+## Finding — mint compatibility (cashu-ts v2)
+`cashu-ts@2.9.0` **cannot verify cdk-mintd keysets** ("Couldn't verify keyset
+ID"): `mint.minibits.cash/Bitcoin` and `mint.orangesync.tech` both fail to load.
+Nutshell-family mints load fine: `testnut.cashu.exchange`,
+`mint.cubabitcoin.org`. So:
+- Free mechanics/integration tests use `testnut.cashu.exchange`.
+- A **real-ecash treasury** should use a Nutshell mint (e.g. Cuba Bitcoin) until
+  we move to a cashu-ts that verifies cdk keysets (v3+), or the fleet mint is
+  changed. NWC remains the fastest real path.
 
 ## Notes
 - nanogpt/ppq `-health.timer` units report failed while `status=unconfigured`
