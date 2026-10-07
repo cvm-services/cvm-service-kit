@@ -75,7 +75,8 @@ export interface AnnounceOptions {
   /** Required input fields (P15). Omit for unknown; use [] to declare none. */
   requiredInputs?: string[];
   optionalInputs?: string[];
-  /** Explicit input tier (none|financial|contact|fulfilment|legal|sensitive).
-   * If omitted it is recomputed from the declared fields. */
-  tier?: string;
+  // NOTE: there is deliberately NO `tier` field. The tier tag is computed from
+  // the declared required/optional inputs (see resolveTier in announce.ts) and
+  // a caller-supplied tier would let a service understate what it collects —
+  // the one lie a reader cannot detect (CEP-draft-0001 P15).
 }
