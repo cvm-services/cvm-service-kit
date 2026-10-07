@@ -26,3 +26,4 @@ Deliverable: `services/cvm-2fiat/` rail-only service. Card body + manager commen
 
 ## Status log
 - [run 86] read-only recon complete; plan set; no files written yet.
+- [run 87] RED → GREEN → shipped. 5 commits on pr/cvm-2fiat (7cd3e5b RED suite, af05bae rail_unavailable, a10c218 service core, 8b1c16c server+live harness, c9daedf deploy wiring). Verified: bun 92/92 pass, tsc clean, deno 24 pass + check clean, credscan CLEAN, live harness LIVE OK over relay2.contextvm.org. Dual push verified: github + ngit both at c9daedf. PR #5 open, CI bun+deno green. Refusal list rendered by docs tool confirmed in PR body. Announce step waits for the announce card (ANNOUNCE=false default).
