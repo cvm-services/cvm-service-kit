@@ -10,6 +10,8 @@ export type TreasuryBackend = "nwc" | "cashu" | "fake";
 export interface WalletEnv {
   TREASURY_BACKEND?: string;
   NWC_URL?: string;
+  /** Treasury mint (where the reseller holds ecash); falls back to CASHU_MINT_URL. */
+  CASHU_TREASURY_MINT_URL?: string;
   CASHU_MINT_URL?: string;
   CASHU_WALLET_SEED?: string;
   CASHU_WALLET_DB?: string;
@@ -35,9 +37,10 @@ function hexToBytes(hex: string): Uint8Array {
  * validate their secrets so a misconfigured prod deploy fails loud.
  */
 export function makeWallet(env: WalletEnv): ResolvedWallet {
+  const cashuMint = env.CASHU_TREASURY_MINT_URL ?? env.CASHU_MINT_URL;
   const auto: TreasuryBackend = env.NWC_URL
     ? "nwc"
-    : env.CASHU_MINT_URL && env.CASHU_WALLET_SEED
+    : cashuMint && env.CASHU_WALLET_SEED
       ? "cashu"
       : "fake";
   const backend = (env.TREASURY_BACKEND as TreasuryBackend) ?? auto;
@@ -48,11 +51,11 @@ export function makeWallet(env: WalletEnv): ResolvedWallet {
       return { wallet: new NwcLnWallet(env.NWC_URL), backend };
     }
     case "cashu": {
-      if (!env.CASHU_MINT_URL) throw new Error("TREASURY_BACKEND=cashu requires CASHU_MINT_URL");
+      if (!cashuMint) throw new Error("TREASURY_BACKEND=cashu requires CASHU_TREASURY_MINT_URL (or CASHU_MINT_URL)");
       if (!env.CASHU_WALLET_SEED) throw new Error("TREASURY_BACKEND=cashu requires CASHU_WALLET_SEED");
       return {
         wallet: new CashuLnWallet({
-          mintUrl: env.CASHU_MINT_URL,
+          mintUrl: cashuMint,
           seed: hexToBytes(env.CASHU_WALLET_SEED),
           dbPath: env.CASHU_WALLET_DB ?? "/var/lib/loom/cvm-treasury/cashu.sqlite",
         }),

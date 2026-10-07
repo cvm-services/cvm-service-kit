@@ -74,35 +74,60 @@ alert on `/health` `low_treasury`; funding runbook; docs updates.
 
 ## Checklist
 
-### Part A — CashuLnWallet
-- [ ] `src/proof-store.ts` (+tests)
-- [ ] `src/cashu-wallet.ts` `payInvoice`/`makeInvoice`/`balanceSats` (+unit tests)
-- [ ] opt-in integration test vs `mint.orangesync.tech`
-- [ ] export from `src/index.ts`; tsc + tests green
+### Part A — CashuLnWallet  ✅
+- [x] `src/proof-store.ts` (Memory + SQLite) + tests
+- [x] `src/cashu-wallet.ts` `payInvoice`/`makeInvoice`/`balanceSats` + unit tests
+- [ ] opt-in integration test vs a live mint (needs a funded wallet)
+- [x] exported; tsc + tests green
 
-### Part B — Mock L402 harness
-- [ ] `services/_shared/mock-l402.ts`
-- [ ] unit: `fetchWithL402` vs mock
-- [ ] full-flow: `create_sms_order` vs mock → code `1234`
-- [ ] manual cvm-call run recorded
+### Part B — Mock L402 harness  ✅
+- [x] `services/_shared/mock-l402.ts` (+ standalone entrypoint)
+- [x] unit: `fetchWithL402` vs mock
+- [x] full-flow: `create_sms_order` vs mock → code `1234`
+- [x] manual cvm-call run recorded → `{"status":"completed","code":"1234"}`
 
-### Part C — Treasury wiring
-- [ ] `services/_shared/wallet.ts` factory
-- [ ] wire `cvm-sms4sats` (TREASURY_BACKEND/NWC_URL/CASHU_*)
-- [ ] `/health` reports backend + balance
+### Part C — Treasury wiring  ✅
+- [x] `services/_shared/wallet.ts` factory (nwc | cashu | fake) + tests
+- [x] wired into `cvm-sms4sats` (TREASURY_BACKEND/NWC_URL/CASHU_TREASURY_MINT_URL/CASHU_WALLET_SEED)
+- [x] `/health` reports `treasury_backend` + balance
 
-### Part D — Live path
-- [ ] NWC or funded Cashu wallet available
+### Part D — Live path  [!] blocked
+- [ ] funded NWC or real-mint Cashu wallet (operator)
 - [ ] live paid `rent-number` E2E (code returned)
 - [ ] `ANNOUNCE=true` + `cvm-registry` entry
 
-### Part E — IaC / ops / docs
-- [ ] treasury env in `playbook-wrappers.yml`
-- [ ] seed + NWC via vault; runbook
-- [ ] low-balance alert wired
-- [ ] docs updated; committed & merged
+### Part E — IaC / ops / docs  ✅
+- [x] treasury env in `playbook-wrappers.yml`
+- [x] managed `secrets.env` (0600, vault-sourced) in the `cvm_service` role
+- [x] low-balance/liveness timer (`<name>-health.timer`, fails when `/health` != ok)
+- [x] docs updated; deploy idempotent
 
-## Open verification (resolve during impl)
-- [ ] cashu-ts v2 `meltProofs` return field for the preimage
-- [ ] cashu-ts v2 proof-store API shape
-- [ ] fakewallet melt preimage behavior
+## Funding runbook
+
+### Real NWC (fastest)
+1. Fund a Lightning wallet that exposes NWC (Alby/CLN/LND).
+2. `-e sms_treasury_backend=nwc -e sms_nwc_url='nostr+walletconnect://…'`
+   (`ansible-playbook playbook-wrappers.yml -e @vault-treasury.yml`).
+3. Flip `ANNOUNCE: "true"` for `cvm-sms4sats`.
+
+### Real ecash (Cashu)
+1. Create a dedicated wallet: `-e sms_treasury_backend=cashu`
+   `-e sms_cashu_treasury_mint_url='https://mint.minibits.cash/Bitcoin'`
+   `-e sms_cashu_seed="$(openssl rand -hex 32)"`.
+2. Fund it: `makeInvoice` mints a BOLT11 quote; pay that invoice from any real
+   Lightning wallet → ecash credits the treasury wallet DB.
+3. `/health` shows `treasury_balance_sats`; the alert fires below the floor.
+
+### First live order type
+Use **`rent-number`** (non-refundable) — `receive-sms` requires a no-amount
+BOLT11 refund invoice we cannot currently mint.
+
+## Open verification
+- [x] cashu-ts v2 melt preimage field → `MeltProofsResponse.quote.payment_preimage`
+- [x] proof-store API shape → custom (SQLite) store
+- [ ] fakewallet melt preimage behavior → resolve on the live test
+
+## Notes
+- nanogpt/ppq `-health.timer` units report failed while `status=unconfigured`
+  (expected until upstream keys are supplied); sms4sats reports `low_treasury`
+  below the floor.
