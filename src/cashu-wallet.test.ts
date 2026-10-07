@@ -13,23 +13,21 @@ class FakeWallet implements CashuWalletLike {
   async createMeltQuote(invoice: string): Promise<CashuMeltQuote> {
     return { quote: "mq", amount: 100, fee_reserve: 2, state: "UNPAID", payment_preimage: null, request: invoice };
   }
-  async send(amount: number, proofs: any[]): Promise<{ send: any[]; keep: any[] }> {
-    const sorted = [...proofs].sort((a, b) => b.amount - a.amount);
-    const send: any[] = [];
-    let total = 0;
-    for (const p of sorted) {
-      if (total >= amount) break;
-      send.push(p);
-      total += p.amount;
-    }
-    const sendSecrets = new Set(send.map((p) => p.secret));
-    return { send, keep: proofs.filter((p) => !sendSecrets.has(p.secret)) };
-  }
-  async meltProofs(quote: CashuMeltQuote): Promise<{ quote: CashuMeltQuote; change: any[] }> {
-    return { quote: { ...quote, state: "PAID", payment_preimage: this.preimage }, change: [] };
+  async meltProofs(_quote: CashuMeltQuote): Promise<{ quote: CashuMeltQuote; change: any[] }> {
+    // Simulate returning change (unused proofs) from the melt.
+    return {
+      quote: { ..._quote, state: "PAID", payment_preimage: this.preimage },
+      change: [proof(300, 99)],
+    };
   }
   async createMintQuote(amount: number): Promise<{ quote: string; request: string; state: string }> {
     return { quote: "mq1", request: `lnbc${amount}n1fake`, state: "UNPAID" };
+  }
+  async checkMintQuote(quote: string): Promise<{ quote: string; request: string; state: string }> {
+    return { quote, request: "lnbc-fake", state: "PAID" };
+  }
+  async mintProofs(amount: number): Promise<any[]> {
+    return [{ amount, secret: `mint-${amount}`, id: "kid", C: "c" }];
   }
 }
 
@@ -55,8 +53,8 @@ describe("CashuLnWallet", () => {
     const { w, store } = mk();
     const r = await w.payInvoice("lnbc100n1x");
     expect(r.preimage).toBe("pre-1");
-    // 128 spent (needed 102), 372 remaining
-    expect(store.sum()).toBe(372);
+    // All 500 submitted; the mint returns 300 change.
+    expect(store.sum()).toBe(300);
   });
 
   test("payInvoice refuses when balance is short", async () => {
@@ -76,5 +74,12 @@ describe("CashuLnWallet", () => {
     const inv = await w.makeInvoice(42);
     expect(inv.bolt11).toBe("lnbc42n1fake");
     expect(inv.paymentHash).toBe("mq1");
+  });
+
+  test("fund mints and credits proofs", async () => {
+    const { w } = mk();
+    const r = await w.fund(200);
+    expect(r.balanceSats).toBe(700); // 500 + 200
+    expect(await w.balanceSats()).toBe(700);
   });
 });

@@ -6,15 +6,13 @@ import { SqliteProofStore, type ProofStore, type StoredProof } from "./proof-sto
 export interface CashuWalletLike {
   loadMint(): Promise<void>;
   createMeltQuote(invoice: string): Promise<CashuMeltQuote>;
-  send(
-    amount: number,
-    proofs: Proof[],
-  ): Promise<{ send: Proof[]; keep: Proof[] }>;
   meltProofs(
     quote: CashuMeltQuote,
     proofs: Proof[],
   ): Promise<{ quote: CashuMeltQuote; change: Proof[] }>;
   createMintQuote(amount: number, description?: string): Promise<{ quote: string; request: string; state: string }>;
+  checkMintQuote(quote: string): Promise<{ quote: string; request: string; state: string }>;
+  mintProofs(amount: number, quote: unknown): Promise<Proof[]>;
 }
 
 export interface CashuMeltQuote {
@@ -66,18 +64,21 @@ export class CashuLnWallet implements LnWallet {
     const quote = await this.wallet.createMeltQuote(bolt11);
     const needed = quote.amount + quote.fee_reserve;
     const available = this.store.all() as unknown as Proof[];
+    console.error(
+      `[cashu] melt quote: amount=${quote.amount} fee=${quote.fee_reserve} needed=${needed} unit=${quote.unit} have=${this.store.sum()}`,
+    );
     if (this.store.sum() < needed) {
       throw new Error(`insufficient cashu balance: have ${this.store.sum()}, need ${needed}`);
     }
 
-    // Split the exact amount (low-level NUT-03 swap) and melt it.
-    const { send, keep } = await this.wallet.send(needed, available);
-    const res = await this.wallet.meltProofs(quote, send as unknown as Proof[]);
+    // NUT-05: submit enough proofs and take the change. Passing a pre-split
+    // exact sum fails when the input fee scales with proof count.
+    const res = await this.wallet.meltProofs(quote, available);
     const preimage = res.quote.payment_preimage;
+    console.error(`[cashu] melt: state=${res.quote.state} preimage=${preimage} change=${res.change?.length ?? 0}`);
 
-    // All selected proofs were consumed by the swap; persist the remains.
+    // All submitted proofs are consumed; persist the change.
     this.store.removeBySecrets(available.map((p) => p.secret));
-    this.store.add(keep.map((p) => p as unknown as StoredProof));
     this.store.add((res.change ?? []).map((p) => p as unknown as StoredProof));
 
     if (!preimage) {
@@ -99,5 +100,32 @@ export class CashuLnWallet implements LnWallet {
   /** Credit proofs after a mint quote is paid (funding). */
   async creditMinted(proofs: Proof[]): Promise<void> {
     this.store.add(proofs.map((p) => p as unknown as StoredProof));
+  }
+
+  /**
+   * Create a mint quote, wait for it to be paid, mint the ecash and credit the
+   * store. On a fakewallet mint the quote auto-pays, so this fully funds a
+   * wallet without external Lightning. Returns the minted proofs.
+   */
+  async fund(
+    amount: number,
+    opts: { intervalMs?: number; attempts?: number } = {},
+  ): Promise<{ proofs: Proof[]; balanceSats: number }> {
+    await this.ensureLoaded();
+    const q = await this.wallet.createMintQuote(amount, "treasury funding");
+    const interval = opts.intervalMs ?? 2000;
+    const attempts = opts.attempts ?? 30;
+    let last: any = q;
+    for (let i = 0; i < attempts; i++) {
+      last = await this.wallet.checkMintQuote(q.quote);
+      if (last.state === "PAID" || last.state === "ISSUED") break;
+      await new Promise((r) => setTimeout(r, interval));
+    }
+    if (last.state !== "PAID" && last.state !== "ISSUED") {
+      throw new Error(`mint quote not paid (state=${last.state})`);
+    }
+    const proofs = await this.wallet.mintProofs(amount, last);
+    this.creditMinted(proofs);
+    return { proofs, balanceSats: this.store.sum() };
   }
 }
