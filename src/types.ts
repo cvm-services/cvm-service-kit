@@ -51,6 +51,9 @@ export interface CvmServerOptions {
   tools: Tool[];
   /** Optional explicit announce so tools/list and the 11317 event agree. */
   onLog?: (line: string) => void;
+  /** Per-relay publish deadline in ms (default 10s). A relay whose publish()
+   * never settles is logged and dropped instead of blocking the others. */
+  publishTimeoutMs?: number;
 }
 
 export interface AnnounceOptions {
