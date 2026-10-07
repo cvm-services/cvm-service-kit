@@ -16,3 +16,5 @@ export * from "./proof-store.ts";
 export * from "./cashu-wallet.ts";
 export * from "./l402.ts";
 export * from "./reseller.ts";
+export * from "./vocab.ts";
+export * from "./validate.ts";

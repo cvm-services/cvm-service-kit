@@ -1,0 +1,19 @@
+{
+  "name": "cvm-service-kit",
+  "version": "0.1.0",
+  "exports": "./src/mod.ts",
+  "tasks": {
+    "test": "deno test --allow-read tests/",
+    "check": "deno check src/mod.ts"
+  },
+  "compilerOptions": {
+    "lib": ["esnext", "deno.ns", "deno.window"]
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "exclude": ["README.md", "vocab/"]
+  },
+  "lint": {
+    "exclude": ["README.md", "vocab/"]
+  }
+}
