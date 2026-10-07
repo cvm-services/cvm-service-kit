@@ -33,3 +33,36 @@ Deliverable: PR #6 https://github.com/cvm-services/cvm-service-kit/pull/6
 ## Constraints kept
 - NWC value never printed/committed/logged (no_log renders; probes key-names only).
 - vps2 read-only (evidence from the task body only; no deploy run here).
+
+---
+# t_539cd9d9 — review-fix round (2026-10-07)
+
+Fix card for cold-review t_41180764 findings on PR #6. Base 90c3248, 3 commits,
+dual-pushed, CI green.
+
+5. 96aa7a3 — F1 (MAJOR): de-vacuous "mints NO order" test in
+   services/cvm-sms4sats/src/wallet.test.ts. answeringClient() 402-stub over the
+   same fetchImpl seam tools.test.ts uses + requestOrder counter; digest field
+   order fixed to mirror deriveOrderId (caller\ncountry\nservice\ntype ->
+   0bcd91ea27b161900f21c97fe32b3522 for handler({service:"tg"})); asserts BOTH
+   orders.get(handler-derived-id) null AND spy requestOrder===0; non-vacuity
+   control test (rail configured -> same client DOES mint, spy=1,
+   pending_payment). Mutations all red: guard below createOrGet (minted order
+   0bcd91ea... caught), guard deleted (reviewer's exact mutation), guard after
+   requestOrder (spy Expected:0 Received:1). Evidence .artifacts/RED-GREEN-F1.txt,
+   RED-DELETED-F1.txt, RED-MUTATION2-F1.txt. Suite 107/0 (was 106/0).
+6. a1d5c9c — F2+F3: assert expression | default('', true) before | string
+   (None/int-0 no longer pass; jinja2 3.1.6 probe in transcript); assert HOISTED
+   above bun-check/sync -> README "before writing anything" + fail_msg
+   "No value was written" now true. verify-secrets-offline.yml: +None case,
+   +int-0 case, follow-ups "failed is defined"->"is true" (was vacuously true on
+   ansible-core 2.21), +2 drift pins reading the ROLE's main.yml (None-safe
+   expression present; assert before 'Sync wrapper source'). Pin sensitivity
+   proven (role-expression revert -> failed=1). ok=16 failed=0 (was ok=10).
+7. e2f0bcb — NIT: server.ts walletFromEnv now reads cfg.nwcUrl (was parsed-but-
+   dead; behaviour identical). tsc clean, deno check+task test clean.
+
+Gates at e2f0bcb: bun 107/0, tsc clean, deno check clean, deno task test 24/0,
+ansible offline ok=16 failed=0, gitleaks-clean tree (no secrets in diff),
+CI ci.yml success (bun+deno) at head. Both remotes verified at e2f0bcb via
+ls-remote (github + ngit). PR #6 head=e2f0bcb MERGEABLE OPEN.
