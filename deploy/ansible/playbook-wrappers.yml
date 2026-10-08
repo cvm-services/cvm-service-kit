@@ -1,8 +1,14 @@
 ---
 # Deploy the ContextVM service wrappers.
 #
-# Staging note: ANNOUNCE=false until the treasury (NWC/real ecash) + upstream
-# keys are supplied. Flip to "true" (and set the secrets) to publish via CEP-6.
+# ANNOUNCE ordering contract (board card t_968d7179): a wrapper is announced
+# ONLY once it can honestly serve its announced surface. The readiness gate is
+# mechanical, not aspirational — for each wrapper its announce-secret is listed
+# in `announce_requires`, and the deploy-time assert below REFUSES a deploy in
+# which ANNOUNCE=true but the rail secret is empty. Evidence collected
+# 2026-10-08 (evidence/announce-readiness-2026-10-08.md): all three silent
+# services fail the gate today (sms4sats fake treasury; ppq dead upstream key;
+# nanogpt no key), which is why every ANNOUNCE below is "false".
 #
 #   cd deploy/ansible
 #   ansible-playbook playbook-wrappers.yml
@@ -20,15 +26,37 @@
     # Vault-sourced secrets (fleet vault, read path fleet/*). Values are
     # supplied at INVOKE time from the operator's vault — NEVER committed:
     #   ansible-playbook playbook-wrappers.yml \
-    #     -e @/root/vault-cvm.yml   # cvm_nwc_url: nostr+walletconnect://…
-    # The role fails the deploy loudly if a required secret is empty.
+    #     -e @/root/vault-cvm.yml   # sms_nwc_url / ppq_api_key / nanogpt_api_key
+    # The gate + role fail the deploy loudly if a required secret is empty.
     # Operator one-time setup (nodes hold no write capability):
     #   bao kv put secret/fleet/cvm-nwc nwc_url='<nostr+walletconnect://…>'
-    cvm_nwc_url: ""
+    #   bao kv put secret/fleet/cvm-ai ppq_api_key='<sk-…>' nanogpt_api_key='<sk-…>'
+    ppq_api_key: ""
+    nanogpt_api_key: ""
+    # ANNOUNCE readiness gate: wrapper name -> secret that MUST be non-empty
+    # when that wrapper's ANNOUNCE is "true" (the honest-rail contract; a
+    # service that announces a paid tool it cannot fulfil is worse than an
+    # unannounced one). The gate reads the SAME dict the role deploys
+    # (item.secrets), so what is checked is what lands on the box.
+    # sms4sats rail = NWC_URL: the deployed server builds its treasury via
+    # walletFromEnv({NWC_URL}) — with it empty the paid tools refuse
+    # rail_unavailable (never a fake balance), so announcing without it would
+    # advertise a paid surface that always refuses. cvm-lambda/2fiat have no
+    # paid rail and no entry.
+    announce_requires:
+      cvm-sms4sats: NWC_URL
+      cvm-ppq: PPQ_API_KEY
+      cvm-nanogpt: NANOGPT_API_KEY
     wrappers_secrets:
-      cvm-sms4sats:
-        NWC_URL: "{{ cvm_nwc_url }}"
-    sms_treasury_backend: "fake"
+      cvm-ppq:
+        PPQ_API_KEY: "{{ ppq_api_key }}"
+      cvm-nanogpt:
+        NANOGPT_API_KEY: "{{ nanogpt_api_key }}"
+    # Rail backend marker for the sms4sats treasury. The deployed server code
+    # currently builds its rail from NWC_URL alone (walletFromEnv); this var
+    # feeds the TREASURY_BACKEND env for forward compatibility with the
+    # makeWallet factory. Never set "fake" in production (1M-sats lie).
+    sms_treasury_backend: "nwc"
     sms_nwc_url: ""
     sms_cashu_treasury_mint_url: ""
     sms_cashu_seed: ""
@@ -39,7 +67,7 @@
     # Pin the deployed source. A full SHA (or tag) makes every deploy
     # reproducible; "main" deploys whatever the branch points at that day.
     # Rollback = set this to the previous SHA and re-run.
-    cvm_kit_version: "323851345422d385070327241b9ef6ad08fd0bf3" # pr/pinned-deploy head (flip-pin until merged, then re-pin to the merge SHA)
+    cvm_kit_version: "29a3421acf71ac9c70852d598bcf4511aff16610" # main head 2026-10-08: transport crash fix (#4) + real wallet (#6/#9) + pinned deploy (#8) + cashu-ts v4 (#3)
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts
@@ -48,6 +76,10 @@
         secrets: "{{ sms_secrets }}"
         config:
           RELAYS: "{{ common_relays }}"
+          # ANNOUNCE stays "false" until the real rail exists: flip ONLY with
+          # NWC_URL (or a funded Cashu treasury) supplied — the announce gate
+          # above refuses the deploy otherwise, and the running code refuses
+          # paid calls with rail_unavailable instead of faking a balance.
           ANNOUNCE: "false"
           ANNOUNCE_D: cvm-sms4sats-01
           SERVICE_CLASS: sms
@@ -64,8 +96,12 @@
         script: services/cvm-nanogpt/src/server.ts
         state_dir: /var/lib/loom/cvm-nanogpt
         health_port: 8782
+        secrets: "{{ wrappers_secrets['cvm-nanogpt'] }}"
         config:
           RELAYS: "{{ common_relays }}"
+          # ANNOUNCE stays "false" until NANOGPT_API_KEY is funded and
+          # supplied: `chat` cannot fulfil without it (availability reports
+          # unconfigured; the announce gate refuses the deploy otherwise).
           ANNOUNCE: "false"
           ANNOUNCE_D: cvm-nanogpt-01
           SERVICE_CLASS: ai
@@ -80,8 +116,12 @@
         script: services/cvm-ppq/src/server.ts
         state_dir: /var/lib/loom/cvm-ppq
         health_port: 8783
+        secrets: "{{ wrappers_secrets['cvm-ppq'] }}"
         config:
           RELAYS: "{{ common_relays }}"
+          # ANNOUNCE stays "false" until a FUNDED PPQ_API_KEY exists (the
+          # fleet's old key died at $0.00 balance on 2026-08-20): `chat` and
+          # `balance` cannot fulfil without it.
           ANNOUNCE: "false"
           ANNOUNCE_D: cvm-ppq-01
           SERVICE_CLASS: ai
@@ -111,6 +151,22 @@
           RATE_REFILL_PER_SEC: "1"
           HEALTH_PORT: "8784"
   tasks:
+    - name: ANNOUNCE readiness gate — a wrapper may not announce a paid tool it cannot fulfil
+      ansible.builtin.assert:
+        that:
+          - item.config.ANNOUNCE != "true" or ((item.secrets | default({})).get(announce_requires[item.name], '') | default('', true) | string | trim | length) > 0
+        fail_msg: >-
+          {{ item.name }}: ANNOUNCE=true but the announce-secret
+          '{{ announce_requires[item.name] }}' is empty — refusing to deploy a
+          service that would announce a paid tool it cannot fulfil. Supply the
+          secret from the fleet vault (see the announce_requires note at the
+          top of this playbook), or keep ANNOUNCE=false. Evidence for why each
+          wrapper is gated: evidence/announce-readiness-2026-10-08.md.
+        success_msg: "{{ item.name }}: announce gate ok (ANNOUNCE={{ item.config.ANNOUNCE }}{% if item.config.ANNOUNCE == 'true' %}, {{ announce_requires[item.name] }} set{% endif %})"
+      when: announce_requires[item.name] is defined
+      loop: "{{ wrappers }}"
+      no_log: false
+
     - name: Deploy each wrapper
       ansible.builtin.include_role:
         name: cvm_service
@@ -120,6 +176,10 @@
         cvm_service_config: "{{ item.config }}"
         cvm_service_state_dir: "{{ item.state_dir }}"
         cvm_service_health_port: "{{ item.health_port | default(0) }}"
-        cvm_service_secrets: "{{ wrappers_secrets[item.name] | default(item.secrets | default({})) }}"
-        cvm_service_require_secrets: "{{ (wrappers_secrets[item.name] | default({})).keys() | list }}"
+        cvm_service_secrets: "{{ item.secrets | default({}) }}"
+        # When a wrapper announces, its announce-secret is REQUIRED — the
+        # role's pre-write assert refuses the deploy if it is empty. Exactly
+        # the gate key, nothing more (backend rail vars follow the gate's
+        # TREASURY_BACKEND choice).
+        cvm_service_require_secrets: "{{ [announce_requires[item.name]] if (announce_requires[item.name] is defined and item.config.ANNOUNCE == 'true') else [] }}"
       loop: "{{ wrappers }}"
