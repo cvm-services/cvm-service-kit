@@ -1,0 +1,1 @@
+2026-10-09: added ngit CI workflow and README, committed 9ee9ab1, pushed branch and merged GitHub PR #10; ngit mirror pushed to feb3358. Coordinator SSH access timed out before remote registration/configuration.
