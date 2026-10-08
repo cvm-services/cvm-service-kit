@@ -84,11 +84,20 @@ export function buildSmsTools(d: SmsDeps): Tool[] {
       priceSats: undefined, // variable price; see payment_required response
       inputSchema: {
         type: "object",
-        required: ["service"],
+        required: ["service", "refund_invoice"],
         properties: {
           service: { type: "string", description: "service code, e.g. tg" },
+          type: {
+            type: "string",
+            enum: ["receive-sms", "rent-number"],
+            description: "order type (default receive-sms)",
+          },
           country: { type: "string", description: "ISO code or 'auto'" },
-          refund_invoice: { type: "string", description: "no-amount BOLT11 for refunds" },
+          duration_minutes: { type: "number", description: "rent-number duration" },
+          refund_invoice: {
+            type: "string",
+            description: "no-amount BOLT11 valid >=30 min (required by sms4sats for all order types)",
+          },
           order_id: { type: "string", description: "idempotency key" },
           cashu_token: { type: "string", description: "Cashu token proving payment" },
         },
@@ -96,15 +105,23 @@ export function buildSmsTools(d: SmsDeps): Tool[] {
     },
     handler: async (args, ctx) => {
       const orderId = orderIdFor(ctx.caller, args);
+      const type = String(args.type ?? "receive-sms");
+      if (typeof args.refund_invoice !== "string" || args.refund_invoice.length === 0) {
+        throw new Error("refund_invoice is required (a no-amount BOLT11 valid for >=30 min)");
+      }
 
       let order = d.orders.get(orderId);
       if (!order) {
-        const quote = await d.client.requestOrder({
-          type: "receive-sms",
+        const body: Record<string, unknown> = {
+          type,
           country: args.country ?? "auto",
           service: args.service,
-          ...(args.refund_invoice ? { refundInvoice: args.refund_invoice } : {}),
-        });
+          refundInvoice: args.refund_invoice,
+        };
+        if (type === "rent-number" && args.duration_minutes) {
+          body.durationMinutes = Number(args.duration_minutes);
+        }
+        const quote = await d.client.requestOrder(body);
         if (quote.status !== 402 || !quote.challenge || !quote.orderId) {
           throw new Error(`upstream rejected order: ${JSON.stringify(quote.raw)}`);
         }

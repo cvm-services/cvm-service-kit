@@ -58,7 +58,7 @@ describe("mock L402 upstream", () => {
     };
     const tool = buildSmsTools(d).find((t) => t.definition.name === "create_sms_order")!;
     const r: any = await tool.handler(
-      { service: "tg", country: "US", cashu_token: "tok", order_id: "m1" },
+      { service: "tg", country: "US", cashu_token: "tok", order_id: "m1", refund_invoice: "lnbc1test" },
       { caller: "npub1buyer" },
     );
     expect(r.code).toBe("9999");
