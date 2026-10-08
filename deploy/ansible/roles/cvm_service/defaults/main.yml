@@ -13,9 +13,18 @@ cvm_bun_version: "1.4.2"
 #   cvm_service_state_dir  — created + owned by the service user
 #   cvm_service_after      — units this service must start after
 #   cvm_service_server_key — pin SERVER_SECRET_KEY (else generated once)
+#   cvm_service_secrets    — dict of VAULT-SOURCED secret env (e.g. NWC_URL),
+#                            written to /etc/<svc>/managed-secrets.env (0600,
+#                            root), fully managed: updates land on redeploy.
+#                            Never a literal value in this repo or the unit.
+#   cvm_service_require_secrets — list of keys that MUST be non-empty; the
+#                            deploy fails loudly before writing anything if
+#                            one is missing (honest rail_unavailable config).
 cvm_service_config: {}
 cvm_service_after: []
-# Secrets templated into /etc/<name>/secrets.env (0600). Source from the vault.
+# Secrets templated into /etc/<name>/managed-secrets.env (0600). Source from the fleet vault.
 cvm_service_secrets: {}
+# Keys that MUST be non-empty; the deploy fails loudly before writing anything.
+cvm_service_require_secrets: []
 # Optional loopback health port for the low-balance / liveness timer.
 cvm_service_health_port: 0
