@@ -1,6 +1,11 @@
 ---
 # Deploy one ContextVM service wrapper. Idempotent.
 #
+# Source of truth for the running code: a git checkout of the kit repo at the
+# PINNED ref `cvm_kit_version` (see defaults/main.yml). The old rsync-only
+# sync is gone — a synced copy with no .git has no SHA, no branch and no
+# rollback, which made "what is running?" unanswerable.
+#
 # Ordering contract: the required-secrets assert runs BEFORE any write to the
 # host (source sync, deps, config/secret env, unit, service start), so a
 # deploy missing a vault secret fails loudly having written nothing.
@@ -32,20 +37,93 @@
   args:
     executable: /bin/bash
 
-- name: Sync wrapper source
-  ansible.posix.synchronize:
-    src: "{{ playbook_dir }}/../../"
-    dest: "{{ cvm_service_repo_dir }}/"
-    delete: true
-    checksum: true
-    rsync_opts:
-      - "--exclude=node_modules"
-      - "--exclude=.git"
-      - "--exclude=.artifacts"
-      - "--exclude=*.sqlite"
-      - "--omit-dir-times"
-  become: false
-  register: cvm_sync
+- name: Ensure git is present (checkout + read-back need it)
+  ansible.builtin.package:
+    name: git
+    state: present
+
+- name: Is the deploy dir already a git checkout?
+  ansible.builtin.stat:
+    path: "{{ cvm_service_repo_dir }}/.git"
+  register: cvm_repo_git
+  # The pre-pinned-deploy role rsync'd a plain copy here. ansible.builtin.git
+  # cannot adopt a non-empty directory that is not a repo — the first run must
+  # move it aside (kept, dated, one rotation) so the clone can land.
+
+- name: Move the old rsync-only copy aside (once, first pinned run)
+  when: cvm_repo_git.stat.exists is defined and not cvm_repo_git.stat.exists
+  ansible.builtin.shell: |
+    set -e
+    if [ -d "{{ cvm_service_repo_dir }}" ] && [ ! -e "{{ cvm_service_repo_dir }}/.git" ]; then
+      ts=$(date -u +%Y%m%dT%H%M%SZ)
+      mv "{{ cvm_service_repo_dir }}" "{{ cvm_service_repo_dir }}.pre-git.$ts"
+      echo "moved-aside {{ cvm_service_repo_dir }}.pre-git.$ts"
+    fi
+  register: cvm_move_aside
+  changed_when: "'moved-aside' in cvm_move_aside.stdout"
+
+- name: Check out the kit at the pinned ref
+  ansible.builtin.git:
+    repo: "{{ cvm_kit_repo }}"
+    dest: "{{ cvm_service_repo_dir }}"
+    version: "{{ cvm_kit_version }}"
+    force: true
+  register: cvm_checkout
+  # `cvm_checkout.after` is the resolved commit of the checkout — the SHA the
+  # services will run from. Debian 13 pitfall: no become_user here; become_user
+  # + git triggers ACL errors. Clone as root, fix ownership below.
+
+- name: Read back the deployed commit (independent verify)
+  ansible.builtin.command:
+    cmd: "git -C {{ cvm_service_repo_dir }} rev-parse HEAD"
+  register: cvm_deployed_sha
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  # rc!=0 only in --check mode before the first real run (no checkout yet on
+  # a box still holding the old rsync'd copy — the original bug this role
+  # fixes); the assert below is what enforces the match on real runs.
+
+- name: Fail if the checkout does not match the pinned ref
+  ansible.builtin.assert:
+    that:
+      - cvm_deployed_sha.rc == 0
+      - cvm_deployed_sha.stdout | trim == cvm_checkout.after
+    fail_msg: >-
+      git rev-parse HEAD (rc={{ cvm_deployed_sha.rc | default(1) }},
+      '{{ cvm_deployed_sha.stdout | default('') | trim }}') does not match the
+      ansible.builtin.git result ({{ cvm_checkout.after | default('') }}) —
+      refusing to record a SHA the checkout does not have.
+  when: not ansible_check_mode
+
+- name: Record the deployed commit for the health endpoint
+  ansible.builtin.copy:
+    content: "{{ (cvm_deployed_sha.stdout | trim) or (cvm_checkout.after | default('')) }}\n"
+    dest: "{{ cvm_service_repo_dir }}/.deployed-sha"
+    owner: "{{ cvm_service_user }}"
+    group: "{{ cvm_service_user }}"
+    mode: "0644"
+
+- name: Record the deployed ref name for the health endpoint
+  ansible.builtin.copy:
+    content: "{{ cvm_kit_version }}\n"
+    dest: "{{ cvm_service_repo_dir }}/.deployed-ref"
+    owner: "{{ cvm_service_user }}"
+    group: "{{ cvm_service_user }}"
+    mode: "0644"
+
+- name: Own the checkout as the service user
+  ansible.builtin.file:
+    path: "{{ cvm_service_repo_dir }}"
+    owner: "{{ cvm_service_user }}"
+    group: "{{ cvm_service_user }}"
+    recurse: true
+  when: cvm_checkout.changed
+
+# Ownership note: chown -R fires only when the checkout changed. Files created
+# later are already service-user owned: bun install runs as the service user
+# (become: false) and .deployed-sha/.deployed-ref are copied with explicit
+# owner/group, so no root-owned stragglers are expected on re-runs.
 
 - name: Install dependencies (frozen lockfile)
   ansible.builtin.command:
@@ -127,7 +205,7 @@
     daemon_reload: true
 
 - name: Restart on change
-  when: cvm_config.changed or cvm_unit.changed or cvm_sync.changed or (cvm_managed_secrets.changed | default(false))
+  when: cvm_config.changed or cvm_unit.changed or cvm_checkout.changed or (cvm_managed_secrets.changed | default(false))
   ansible.builtin.systemd:
     name: "{{ cvm_service_name }}"
     state: restarted
@@ -164,7 +242,7 @@
   failed_when: false
 
 - name: Whitelist the controller IP in fail2ban
-  when: (cvm_controller_ip.stdout | default('') | trim) is match('^[0-9]+(\.[0-9]+){3}$')
+  when: (cvm_controller_ip.stdout | default('') | trim) is match('^[0-9]+(\\.[0-9]+){3}$')
   ansible.builtin.shell: >-
     fail2ban-client set sshd addignoreip {{ cvm_controller_ip.stdout | trim }} || true
   changed_when: false

@@ -1,9 +1,15 @@
 ---
-# Generic ContextVM service-wrapper deployment role.
-cvm_service_user: debian
-cvm_service_home: "/home/{{ cvm_service_user }}"
-cvm_service_repo_dir: "/home/{{ cvm_service_user }}/cvm-service-kit"
-cvm_bun_version: "1.4.2"
+# The deployed source: a git checkout of the kit at a PINNED ref. Everything
+# the wrapper services run derives from this ref — that is the whole point of
+# the pinned-deploy change (a synced copy with no .git has no SHA and no
+# rollback).
+#
+# The playbook pins `cvm_kit_version` to a full SHA in production. The default
+# here is ALSO a full SHA (never a moving ref): at a SHA the checkout is exact
+# and cannot drift; at a moving ref every deploy is whatever the ref points at
+# that day, which defeats reproducibility.
+cvm_kit_repo: "https://github.com/cvm-services/cvm-service-kit.git"
+cvm_kit_version: "323851345422d385070327241b9ef6ad08fd0bf3" # pr/pinned-deploy head; re-pin to the merge SHA after PR #8 lands
 
 # Required per invocation:
 #   cvm_service_name   — e.g. cvm-nanogpt (also the systemd unit + /etc dir)
@@ -21,6 +27,10 @@ cvm_bun_version: "1.4.2"
 #                            deploy fails loudly before writing anything if
 #                            one is missing (honest rail_unavailable config).
 cvm_service_config: {}
+cvm_service_user: debian
+cvm_service_home: "/home/{{ cvm_service_user }}"
+cvm_service_repo_dir: "/home/{{ cvm_service_user }}/cvm-service-kit"
+cvm_bun_version: "1.4.2"
 cvm_service_after: []
 # Secrets templated into /etc/<name>/managed-secrets.env (0600). Source from the fleet vault.
 cvm_service_secrets: {}

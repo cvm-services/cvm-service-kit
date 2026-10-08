@@ -36,6 +36,10 @@
       NWC_URL: "{{ sms_nwc_url }}"
       CASHU_TREASURY_MINT_URL: "{{ sms_cashu_treasury_mint_url }}"
       CASHU_WALLET_SEED: "{{ sms_cashu_seed }}"
+    # Pin the deployed source. A full SHA (or tag) makes every deploy
+    # reproducible; "main" deploys whatever the branch points at that day.
+    # Rollback = set this to the previous SHA and re-run.
+    cvm_kit_version: "323851345422d385070327241b9ef6ad08fd0bf3" # pr/pinned-deploy head (flip-pin until merged, then re-pin to the merge SHA)
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts
