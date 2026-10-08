@@ -60,7 +60,7 @@ async function main() {
 
   try {
     const r: any = await tool.handler(
-      { service: "tg", country: "US", order_id: "cashu-e2e-1" },
+      { service: "tg", country: "US", order_id: "cashu-e2e-1", refund_invoice: "lnbc1test" },
       { caller: "npub1e2e" },
     );
     console.log("result:", JSON.stringify(r));

@@ -101,8 +101,11 @@ change. Verified against `testnut.cashu.exchange`: `state=PAID`,
       it (`state=PAID`, preimage) → `{"status":"completed","code":"1234"}`
 
 ### Part D — Live path  [!] blocked
-- [ ] funded NWC or real-mint Cashu wallet (operator)
-- [ ] live paid `rent-number` E2E (code returned)
+- [x] client validated against the live sms4sats order API (402 shape; both
+      order types require `refundInvoice`); `create_sms_order` sends
+      `type`/`refundInvoice`/`durationMinutes`
+- [ ] funded wallet that can issue an **amountless** BOLT11 (refund invoice)
+- [ ] live paid order E2E (code returned)
 - [ ] `ANNOUNCE=true` + `cvm-registry` entry
 
 ### Part E — IaC / ops / docs  ✅
@@ -127,9 +130,12 @@ change. Verified against `testnut.cashu.exchange`: `state=PAID`,
    Lightning wallet → ecash credits the treasury wallet DB.
 3. `/health` shows `treasury_balance_sats`; the alert fires below the floor.
 
-### First live order type
-Use **`rent-number`** (non-refundable) — `receive-sms` requires a no-amount
-BOLT11 refund invoice we cannot currently mint.
+### Refund invoice — the real live blocker (verified against the live API)
+Both `receive-sms` **and** `rent-number` require a `refundInvoice` (a no-amount
+BOLT11 valid ≥30 min). Our Cashu/NWC `makeInvoice` produces *amounted* invoices,
+so the live path needs a Lightning wallet that can issue an **amountless**
+invoice. `create_sms_order` now takes `type` (`receive-sms` | `rent-number`),
+`duration_minutes`, and requires `refund_invoice`.
 
 ## Open verification
 - [x] cashu-ts v2 melt preimage field → `MeltProofsResponse.quote.payment_preimage`
