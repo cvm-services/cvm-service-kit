@@ -1,0 +1,86 @@
+{
+  "jsonrpc": "2.0",
+  "id": 410064238,
+  "result": {
+    "tools": [
+      {
+        "name": "availability",
+        "description": "Report whether the service can currently fulfil orders.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "list_services",
+        "description": "List the service codes sms4sats supports (tg, go, wa, …).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "catalog",
+        "description": "List SMS/rent offers by country and service code.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "country": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "create_sms_order",
+        "description": "Order a one-time SMS verification number and return the received code. Paid via CEP-8 (Cashu).",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "service"
+          ],
+          "properties": {
+            "service": {
+              "type": "string",
+              "description": "service code, e.g. tg"
+            },
+            "country": {
+              "type": "string",
+              "description": "ISO code or 'auto'"
+            },
+            "refund_invoice": {
+              "type": "string",
+              "description": "no-amount BOLT11 for refunds"
+            },
+            "order_id": {
+              "type": "string",
+              "description": "idempotency key"
+            },
+            "cashu_token": {
+              "type": "string",
+              "description": "Cashu token proving payment"
+            }
+          }
+        }
+      },
+      {
+        "name": "order_status",
+        "description": "Return the status/result of a previously created SMS order.",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "order_id"
+          ],
+          "properties": {
+            "order_id": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 195682902,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"status\":\"unconfigured\",\"service\":\"ppq\",\"price_sats\":5,\"default_model\":\"deepseek/deepseek-v3.2\"}"
+      }
+    ],
+    "isError": false
+  }
+}

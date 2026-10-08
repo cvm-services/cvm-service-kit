@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 493280033,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"items\":[],\"updatedAt\":\"2026-10-08T12:41:57.641Z\"}"
+      }
+    ],
+    "isError": false
+  }
+}

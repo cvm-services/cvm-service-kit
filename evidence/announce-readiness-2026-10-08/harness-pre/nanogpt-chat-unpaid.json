@@ -1,0 +1,15 @@
+{
+  "jsonrpc": "2.0",
+  "id": 585812562,
+  "error": {
+    "code": -32002,
+    "message": "payment_required",
+    "data": {
+      "orderId": "ef0a75dcaf06450ae1d20c0794c93fc5",
+      "invoice": "cashu:https://testnut.cashu.exchange:5",
+      "amountSats": 5,
+      "paymentHash": "cashu:ef0a75dcaf06450ae1d20c0794c93fc5",
+      "pmi": "bitcoin-cashu"
+    }
+  }
+}

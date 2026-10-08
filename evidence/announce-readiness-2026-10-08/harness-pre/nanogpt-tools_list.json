@@ -1,0 +1,68 @@
+{
+  "jsonrpc": "2.0",
+  "id": 746555576,
+  "result": {
+    "tools": [
+      {
+        "name": "chat",
+        "description": "Chat completion via the proxied AI provider (paid per call).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "messages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "role",
+                  "content"
+                ]
+              }
+            },
+            "prompt": {
+              "type": "string",
+              "description": "shorthand for a single user message"
+            },
+            "model": {
+              "type": "string"
+            },
+            "max_tokens": {
+              "type": "number"
+            },
+            "order_id": {
+              "type": "string",
+              "description": "idempotency key for a paid call"
+            },
+            "cashu_token": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "models",
+        "description": "List available models from the provider.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "availability",
+        "description": "Report whether the AI service is configured and priced.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ]
+  }
+}

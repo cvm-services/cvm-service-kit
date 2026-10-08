@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 535048478,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"status\":\"unconfigured\",\"service\":\"nanogpt\",\"price_sats\":5,\"default_model\":\"openai/gpt-4.1-nano\"}"
+      }
+    ],
+    "isError": false
+  }
+}
