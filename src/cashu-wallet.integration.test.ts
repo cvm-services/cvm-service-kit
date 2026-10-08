@@ -13,8 +13,9 @@ import { join } from "node:path";
 import { CashuLnWallet } from "./cashu-wallet.ts";
 
 const ENABLED = !!process.env.MINT_INTEGRATION;
-// NB: cashu-ts v2 can't verify cdk-mintd keysets (Minibits, mint.orangesync.tech);
-// it works with Nutshell-family mints (testnut, mint.cubabitcoin.org).
+// NB: v4 verifies cdk-mintd keysets, so cdk mints (mint.orangesync.tech) work
+// too; testnut (Nutshell fakewallet) remains the default because its quotes
+// auto-pay, which the fund() path relies on.
 const MINT = process.env.CASHU_TEST_MINT ?? "https://testnut.cashu.exchange";
 const d = ENABLED ? describe : describe.skip;
 
