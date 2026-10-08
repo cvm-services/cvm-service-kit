@@ -151,6 +151,26 @@
           RATE_REFILL_PER_SEC: "1"
           HEALTH_PORT: "8784"
   tasks:
+    - name: ANNOUNCE canonical form — only the exact strings "true"/"false" are defined
+      # The services read (env.ANNOUNCE ?? "true") !== "false" — case- and
+      # whitespace-sensitive, and anything else ANNOUNCES. A YAML bool or
+      # "True"/" true " therefore announces while my normalized gate would
+      # call it silent (measured: gate-proof case 4). Refuse every
+      # non-canonical value up front so exact-string comparisons below are
+      # provably aligned with the service's own test.
+      ansible.builtin.assert:
+        that:
+          - item.config.ANNOUNCE is string
+          - item.config.ANNOUNCE in ['true', 'false']
+        fail_msg: >-
+          {{ item.name }}: ANNOUNCE={{ item.config.ANNOUNCE | default('<unset>') | to_json }}
+          is not one of the exact strings "true"/"false". The service treats
+          everything except the literal string "false" as announce, so a YAML
+          bool or any spelling variant silently announces. Write the exact
+          string.
+        success_msg: "{{ item.name }}: ANNOUNCE canonical ({{ item.config.ANNOUNCE }})"
+      loop: "{{ wrappers }}"
+
     - name: ANNOUNCE readiness gate — a wrapper may not announce a paid tool it cannot fulfil
       ansible.builtin.assert:
         that:
@@ -167,6 +187,22 @@
       loop: "{{ wrappers }}"
       no_log: false
 
+    - name: ANNOUNCE registry gate — announcing wrappers MUST be in announce_requires
+      # Closes the silent-skip hole: the gate above only fires for wrappers in
+      # the map, so a future paid wrapper omitted from announce_requires would
+      # sail through ungated. Here announcing without a map entry is itself a
+      # deploy failure — adding a paid wrapper means adding its rail secret.
+      ansible.builtin.assert:
+        that:
+          - item.config.ANNOUNCE != "true" or announce_requires[item.name] is defined
+        fail_msg: >-
+          {{ item.name }}: ANNOUNCE=true but the wrapper has no announce_requires
+          entry — an ungated announcement is exactly what this playbook exists
+          to prevent. Add {{ item.name }} -> <rail secret var> to
+          announce_requires, or keep ANNOUNCE=false.
+        success_msg: "{{ item.name }}: announce registry ok (ANNOUNCE={{ item.config.ANNOUNCE }})"
+      loop: "{{ wrappers }}"
+
     - name: Deploy each wrapper
       ansible.builtin.include_role:
         name: cvm_service
@@ -180,6 +216,7 @@
         # When a wrapper announces, its announce-secret is REQUIRED — the
         # role's pre-write assert refuses the deploy if it is empty. Exactly
         # the gate key, nothing more (backend rail vars follow the gate's
-        # TREASURY_BACKEND choice).
+        # TREASURY_BACKEND choice). Exact-string "true" is safe here because
+        # the canonical-form assert above already refused every variant.
         cvm_service_require_secrets: "{{ [announce_requires[item.name]] if (announce_requires[item.name] is defined and item.config.ANNOUNCE == 'true') else [] }}"
       loop: "{{ wrappers }}"
