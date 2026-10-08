@@ -166,8 +166,16 @@ describe("(a) unconfigured wallet — the paid path refuses rail_unavailable", (
     const caller = "c".repeat(64);
     // Unpaid caller: the gate demands payment AFTER the order is minted —
     // PaymentRequiredError is expected and swallowed (refusalOf rethrows it).
+    // refund_invoice is REQUIRED by the live upstream API (see PR #9); the
+    // field check runs before the gate, so it must be present for the order
+    // to be minted at all.
     await refusalOf(() =>
-      Promise.resolve(create.handler({ service: "tg", country: "US" }, { caller }))
+      Promise.resolve(
+        create.handler(
+          { service: "tg", country: "US", refund_invoice: "lnbc1noamountvalid30m" },
+          { caller },
+        ),
+      )
     ).catch(() => {});
     const derived = createHash("sha256")
       .update(`${caller}\nUS\ntg\nreceive-sms`)

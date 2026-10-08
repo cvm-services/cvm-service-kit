@@ -24,6 +24,7 @@ export function pubkeyHexOf(sk: Uint8Array): string {
 }
 
 const RELAY_TIMEOUT_MS = 10_000;
+const PUBLISH_TIMEOUT_MS = 10_000;
 
 async function connectWithTimeout(url: string): Promise<RelayLike> {
   const relay = await Promise.race([
@@ -33,6 +34,34 @@ async function connectWithTimeout(url: string): Promise<RelayLike> {
     ),
   ]);
   return relay as unknown as RelayLike;
+}
+
+/**
+ * Format a relay-close "reason" of any shape into one log-safe string.
+ *
+ * The kit's RelayLike type used to declare `reasons: string[]`, but that was
+ * never what nostr-tools sends: AbstractRelay calls the SUBSCRIPTION onclose
+ * with a single string (`this.onclose?.(reason)`) and the RELAY-level onclose
+ * with no argument at all — and future versions may hand over a CloseEvent.
+ * Assuming `.join` here threw `TypeError: reasons?.join is not a function`
+ * inside the close handler and restart-looped every deployed unit
+ * (observed 2026-10-07: NRestarts 11-12 across all four services, hidden by
+ * Restart=always). Never assume the shape; stringify defensively.
+ */
+function formatCloseReason(reasons: unknown): string {
+  if (reasons == null) return "";
+  if (Array.isArray(reasons)) {
+    return reasons.map(formatCloseReason).filter(Boolean).join(",");
+  }
+  if (reasons instanceof Error) return reasons.message;
+  if (typeof reasons === "object") {
+    const { code, reason } = reasons as { code?: unknown; reason?: unknown };
+    const parts: string[] = [];
+    if (typeof code === "number") parts.push(String(code));
+    if (typeof reason === "string" && reason) parts.push(reason);
+    return parts.join(" ") || "closed";
+  }
+  return String(reasons);
 }
 
 /**
@@ -79,8 +108,8 @@ export class CvmServer {
               this.log(`handle error: ${e?.message ?? e}`),
             );
           },
-          onclose: (reasons: string[]) =>
-            this.log(`relay closed ${url}: ${reasons?.join(",") ?? ""}`),
+          onclose: (reasons: unknown) =>
+            this.log(`relay closed ${url}: ${formatCloseReason(reasons)}`),
         });
         this.relays.push(relay);
         this.log(`connected ${url}`);
@@ -222,13 +251,46 @@ export class CvmServer {
       } as any,
       wrapSk,
     );
-    for (const r of this.relays) {
-      try {
-        await r.publish(giftWrap);
-      } catch (e: any) {
-        this.log(`publish failed: ${e?.message ?? e}`);
-      }
-    }
+    await this.publishToAll(giftWrap, "publish failed");
+  }
+
+  /**
+   * Publish one event to every connected relay CONCURRENTLY, each bounded by
+   * a per-relay deadline. The old sequential `for … await` loop let a single
+   * relay whose publish() never settles (dead TCP, half-open socket, a relay
+   * that accepts the frame and never replies OK) wedge the whole loop, so the
+   * event was never even attempted on the remaining healthy relays — one bad
+   * relay suppressed all delivery. Each relay is raced against its own
+   * timeout; failures are logged and dropped, never awaited forever.
+   */
+  private async publishToAll(event: Event, errPrefix: string): Promise<void> {
+    const timeoutMs = this.opts.publishTimeoutMs ?? PUBLISH_TIMEOUT_MS;
+    await Promise.all(
+      this.relays.map((r) =>
+        Promise.race([
+          // async IIFE, NOT `r.publish().catch(...)`: a publish() that throws
+          // SYNCHRONOUSLY (before returning a promise) would escape a plain
+          // `.catch` chain, reject this Promise.all and starve every other
+          // relay — the very failure this method exists to prevent. The IIFE
+          // converts both sync throws and async rejections into one caught,
+          // logged path. (`Promise.resolve(r.publish(...))` would NOT fix it:
+          // the argument is still evaluated before the wrapper exists.)
+          (async () => {
+            try {
+              await r.publish(event);
+            } catch (e: any) {
+              this.log(`${errPrefix}: ${e?.message ?? e}`);
+            }
+          })(),
+          new Promise<void>((resolve) =>
+            setTimeout(() => {
+              this.log(`${errPrefix}: timeout after ${timeoutMs}ms`);
+              resolve();
+            }, timeoutMs),
+          ),
+        ]),
+      ),
+    );
   }
 
   /** Publish a signed replaceable/announcement event to all connected relays. */
@@ -242,13 +304,7 @@ export class CvmServer {
       },
       this.secretKey,
     );
-    for (const r of this.relays) {
-      try {
-        await r.publish(event);
-      } catch (e: any) {
-        this.log(`publish ${args.kind} failed: ${e?.message ?? e}`);
-      }
-    }
+    await this.publishToAll(event, `publish ${args.kind} failed`);
     return event;
   }
 }

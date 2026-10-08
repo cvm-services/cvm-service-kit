@@ -63,7 +63,7 @@ describe("create_sms_order", () => {
   test("paid: pays upstream, returns the code, order fulfilled", async () => {
     const { d, wallet } = deps(true);
     const r: any = await tool(d, "create_sms_order").handler(
-      { service: "tg", country: "US", cashu_token: "tok", order_id: "o1" },
+      { service: "tg", country: "US", cashu_token: "tok", order_id: "o1", refund_invoice: "lnbc1test" },
       { caller: "npub1buyer" },
     );
     expect(r.code).toBe("1234");
@@ -77,16 +77,50 @@ describe("create_sms_order", () => {
   test("unpaid: payment_required, upstream untouched, order pending", async () => {
     const { d, wallet } = deps(false);
     await expect(
-      tool(d, "create_sms_order").handler({ service: "tg", order_id: "o2" }, { caller: "npub1buyer" }),
+      tool(d, "create_sms_order").handler({ service: "tg", order_id: "o2", refund_invoice: "lnbc1test" }, { caller: "npub1buyer" }),
     ).rejects.toBeInstanceOf(PaymentRequiredError);
     expect(wallet.paid.length).toBe(0);
     expect(d.orders.get("o2")!.status).toBe("pending_payment");
   });
 
+  test("sends type + refundInvoice (+ duration) to the upstream", async () => {
+    let body: any;
+    const f = async (_url: string, init: any) => {
+      if (init?.body) body = JSON.parse(init.body);
+      return res(402, { macaroon: "m", invoice: "lnbc50n1x", priceSats: 50, orderId: "ord-1" });
+    };
+    const wallet = new FakeLnWallet(100_000);
+    const d: SmsDeps = {
+      client: new Sms4SatsClient({ baseUrl: "http://mock", fetchImpl: f as any }),
+      wallet,
+      treasury: new Treasury(wallet, { floorSats: 0 }),
+      orders: new SqliteOrderStore(join(mkdtempSync(join(tmpdir(), "sms-")), "o.sqlite")),
+      pricing: { markup: 0.2, minSats: 1 },
+      gate: new ExplicitGate(new FakeProcessor(true)),
+      poll: { intervalMs: 1, attempts: 1 },
+    };
+    await Promise.resolve(
+      tool(d, "create_sms_order").handler(
+        {
+          service: "tg",
+          type: "rent-number",
+          duration_minutes: 60,
+          refund_invoice: "lnbc1refund",
+          cashu_token: "tok",
+          order_id: "b1",
+        },
+        { caller: "c" },
+      ),
+    ).catch(() => {});
+    expect(body.type).toBe("rent-number");
+    expect(body.refundInvoice).toBe("lnbc1refund");
+    expect(body.durationMinutes).toBe(60);
+  });
+
   test("min-price floor is applied to the client price", async () => {
     const { d } = deps(false, { markup: 0.2, minSats: 500 });
     await Promise.resolve(
-      tool(d, "create_sms_order").handler({ service: "tg", order_id: "o3" }, { caller: "c" }),
+      tool(d, "create_sms_order").handler({ service: "tg", order_id: "o3", refund_invoice: "lnbc1test" }, { caller: "c" }),
     ).catch(() => {});
     expect(d.orders.get("o3")!.priceSats).toBe(500);
   });
