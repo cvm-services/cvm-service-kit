@@ -11,6 +11,17 @@
   become: true
   vars:
     common_relays: "wss://nostr.mom,wss://relay.primal.net,wss://nos.lol,wss://relay2.contextvm.org,wss://relay2.orangesync.tech"
+    # Vault-sourced secrets (fleet vault, read path fleet/*). Values are
+    # supplied at INVOKE time from the operator's vault — NEVER committed:
+    #   ansible-playbook playbook-wrappers.yml \
+    #     -e @/root/vault-cvm.yml   # cvm_nwc_url: nostr+walletconnect://…
+    # The role fails the deploy loudly if a required secret is empty.
+    # Operator one-time setup (nodes hold no write capability):
+    #   bao kv put secret/fleet/cvm-nwc nwc_url='<nostr+walletconnect://…>'
+    cvm_nwc_url: ""
+    wrappers_secrets:
+      cvm-sms4sats:
+        NWC_URL: "{{ cvm_nwc_url }}"
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts
@@ -84,4 +95,6 @@
         cvm_service_script: "{{ item.script }}"
         cvm_service_config: "{{ item.config }}"
         cvm_service_state_dir: "{{ item.state_dir }}"
+        cvm_service_secrets: "{{ wrappers_secrets[item.name] | default({}) }}"
+        cvm_service_require_secrets: "{{ (wrappers_secrets[item.name] | default({})).keys() | list }}"
       loop: "{{ wrappers }}"

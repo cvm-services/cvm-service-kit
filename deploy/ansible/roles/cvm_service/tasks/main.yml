@@ -1,5 +1,23 @@
 ---
 # Deploy one ContextVM service wrapper. Idempotent.
+#
+# Ordering contract: the required-secrets assert runs BEFORE any write to the
+# host (source sync, deps, config/secret env, unit, service start), so a
+# deploy missing a vault secret fails loudly having written nothing.
+
+- name: Fail loudly if a required vault secret is missing
+  when: cvm_service_require_secrets | length > 0
+  ansible.builtin.assert:
+    that:
+      - (cvm_service_secrets.get(item, '') | default('', true) | string | trim | length) > 0
+    fail_msg: >-
+      {{ cvm_service_name }}: required vault secret '{{ item }}' is empty or
+      unset. Source it from the fleet vault (read path fleet/*) into
+      cvm_service_secrets at deploy time; refusing to deploy a service whose
+      paid rail would silently be unavailable. No value was written.
+    success_msg: "required secrets present: {{ cvm_service_require_secrets | join(', ') }}"
+  loop: "{{ cvm_service_require_secrets }}"
+  no_log: true
 
 - name: Check installed bun version
   ansible.builtin.command: "{{ cvm_service_home }}/.bun/bin/bun --version"
@@ -77,6 +95,17 @@
     group: root
     mode: "0600"
 
+- name: Managed vault secrets env (NWC_URL &c. — fully managed, 0600)
+  when: cvm_service_secrets | length > 0
+  ansible.builtin.template:
+    src: managed-secrets.env.j2
+    dest: "/etc/{{ cvm_service_name }}/managed-secrets.env"
+    owner: root
+    group: root
+    mode: "0600"
+  register: cvm_managed_secrets
+  no_log: true
+
 - name: Systemd unit
   ansible.builtin.template:
     src: service.service.j2
@@ -94,7 +123,7 @@
     daemon_reload: true
 
 - name: Restart on change
-  when: cvm_config.changed or cvm_unit.changed or cvm_sync.changed
+  when: cvm_config.changed or cvm_unit.changed or cvm_sync.changed or (cvm_managed_secrets.changed | default(false))
   ansible.builtin.systemd:
     name: "{{ cvm_service_name }}"
     state: restarted

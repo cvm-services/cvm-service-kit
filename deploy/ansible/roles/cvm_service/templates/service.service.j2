@@ -8,6 +8,9 @@ User={{ cvm_service_user }}
 WorkingDirectory={{ cvm_service_repo_dir }}
 EnvironmentFile=/etc/{{ cvm_service_name }}/config.env
 EnvironmentFile=/etc/{{ cvm_service_name }}/secret.env
+{% if cvm_service_secrets | length > 0 %}
+EnvironmentFile=/etc/{{ cvm_service_name }}/managed-secrets.env
+{% endif %}
 ExecStart={{ cvm_service_home }}/.bun/bin/bun {{ cvm_service_repo_dir }}/{{ cvm_service_script }}
 Restart=always
 RestartSec=3
