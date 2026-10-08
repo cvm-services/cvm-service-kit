@@ -1,0 +1,97 @@
+---
+# Localhost proof of the ANNOUNCE readiness-gate expression from
+# playbook-wrappers.yml: same vars shape, same assert, three cases.
+- name: Gate expression behavior proof
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    announce_requires:
+      cvm-sms4sats: NWC_URL
+      cvm-ppq: PPQ_API_KEY
+    # case 1: announce without rail -> must FAIL
+    wrappers_fail:
+      - name: cvm-sms4sats
+        config: { ANNOUNCE: "true" }
+        secrets: { NWC_URL: "" }
+    # case 2: silent + empty secret -> must PASS
+    wrappers_silent:
+      - name: cvm-sms4sats
+        config: { ANNOUNCE: "false" }
+        secrets: { NWC_URL: "" }
+      - name: cvm-ppq
+        config: { ANNOUNCE: "true" }
+        secrets: { PPQ_API_KEY: "TEST" }
+    # case 3: announce + secret present, and missing-secrets-dict default
+    wrappers_ok:
+      - name: cvm-sms4sats
+        config: { ANNOUNCE: "true" }
+        secrets: { NWC_URL: "nostr+walletconnect://TEST" }
+      - name: cvm-ppq
+        config: { ANNOUNCE: "false" }
+  tasks:
+    - name: Case 1 — announce with empty rail secret MUST fail
+      ansible.builtin.assert:
+        that:
+          - item.config.ANNOUNCE != "true" or ((item.secrets | default({})).get(announce_requires[item.name], '') | default('', true) | string | trim | length) > 0
+      loop: "{{ wrappers_fail }}"
+      ignore_errors: true
+      register: case1
+
+    - name: Case 1 verdict — refused
+      ansible.builtin.assert:
+        that: case1.results[0].failed is true
+
+    - name: Case 2 — silent wrapper passes even with empty secret
+      ansible.builtin.assert:
+        that:
+          - item.config.ANNOUNCE != "true" or ((item.secrets | default({})).get(announce_requires[item.name], '') | default('', true) | string | trim | length) > 0
+      loop: "{{ wrappers_silent }}"
+
+    - name: Case 3 — announce + secret present passes (incl. no-secrets default)
+      ansible.builtin.assert:
+        that:
+          - item.config.ANNOUNCE != "true" or ((item.secrets | default({})).get(announce_requires[item.name], '') | default('', true) | string | trim | length) > 0
+      loop: "{{ wrappers_ok }}"
+
+    - name: Case 4 — every non-canonical ANNOUNCE value must be refused (bool/True/" true "/"False")
+      ansible.builtin.assert:
+        that:
+          - item.config.ANNOUNCE is string
+          - item.config.ANNOUNCE in ['true', 'false']
+        fail_msg: "non-canonical must be refused"
+      loop:
+        - { name: c1, config: { ANNOUNCE: true } }
+        - { name: c2, config: { ANNOUNCE: "True" } }
+        - { name: c3, config: { ANNOUNCE: " true " } }
+        - { name: c4, config: { ANNOUNCE: "False" } }
+      ignore_errors: true
+      register: case4
+
+    - name: Case 4 verdict — all four non-canonical refused
+      ansible.builtin.assert:
+        that: case4.results | selectattr('failed', 'defined') | selectattr('failed') | list | length == 4
+
+    - name: Case 4 sanity — canonical values pass
+      ansible.builtin.assert:
+        that:
+          - item.config.ANNOUNCE is string
+          - item.config.ANNOUNCE in ['true', 'false']
+      loop:
+        - { name: ok1, config: { ANNOUNCE: "true" } }
+        - { name: ok2, config: { ANNOUNCE: "false" } }
+
+    - name: Case 5 — ANNOUNCE="true" without an announce_requires entry must fail
+      ansible.builtin.assert:
+        that:
+          - item.config.ANNOUNCE != "true" or announce_requires[item.name] is defined
+        fail_msg: "unregistered announcer must be refused"
+      loop:
+        - name: cvm-newpaid
+          config: { ANNOUNCE: "true" }
+      ignore_errors: true
+      register: case5
+
+    - name: Case 5 verdict — unregistered announcer refused
+      ansible.builtin.assert:
+        that: case5.results | selectattr('failed', 'defined') | selectattr('failed') | list | length == 1
