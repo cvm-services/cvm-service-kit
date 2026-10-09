@@ -9,7 +9,7 @@
 # and cannot drift; at a moving ref every deploy is whatever the ref points at
 # that day, which defeats reproducibility.
 cvm_kit_repo: "https://github.com/cvm-services/cvm-service-kit.git"
-cvm_kit_version: "323851345422d385070327241b9ef6ad08fd0bf3" # pr/pinned-deploy head; re-pin to the merge SHA after PR #8 lands
+cvm_kit_version: "c2b1cbcb31c9549cff0665130a8c3ac5a2cd7cfa" # squash-merge SHA for PR #8; update deliberately for rollback/release changes
 
 # Required per invocation:
 #   cvm_service_name   — e.g. cvm-nanogpt (also the systemd unit + /etc dir)
