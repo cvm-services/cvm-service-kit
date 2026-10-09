@@ -1,27 +1,28 @@
-# t_9c37cf49 — tier-computation regression in announce.ts
+# PROGRESS — t_63be63f1 (gated fiat payment path)
 
-## Findings (STEP 1, verified 2026-10-07)
-- CLAIM TRUE. Deployed vps2:cvm-service-kit (blob == commit 21d943c,
-  pre-PR#1): src/announce.ts:74-75 `if (opts.tier) return opts.tier;` +
-  src/types.ts:77 `tier?: string`.
-- github/main b523c9c: same hole at src/announce.ts:90 + types.ts:77 (old
-  AnnounceOptions API; the new AnnounceInput/emitAnnouncement API from PR #1 is clean).
-- All 4 open PR branches (pr/real-wallet, pr/cvm-2fiat, pr/transport-hardening,
-  pr/cashu-ts-v4): same hole at announce.ts:90.
-- No caller passes tier: today — latent hole, not an exploited one.
-- 7bf4be6 fixed a DIFFERENT announce defect (geohash guard) in the new emitter.
+Task: no fiat spend before the sats have settled (ADR-0008) + ADR-0012 escalation.
 
-## Fix (STEP 2) on branch worker-base/t_9c37cf49 (base github/main b523c9c)
-- RED: src/announce.test.ts new describe "the tier is COMPUTED, never supplied"
-  — failed pre-fix (cvm:tier:none emitted for email+"none").
-- GREEN: removed `if (opts.tier) return opts.tier;` from resolveTier; removed
-  `tier?: string` from AnnounceOptions; computeTier error message updated.
-- bun test 81/0, bun typecheck rc=0, deno check rc=0, deno test 24/0.
-- Files: src/announce.ts, src/types.ts, src/announce.test.ts
+## Sequencing reality (checked 2026-10-10, do not re-discover)
+- t_e19ad2e9 (MONEY BUG / kit gate fix) = `ready`. Work exists as PR #13
+  `fix/gate-money-safety`, OPEN + cross-family review **BLOCKED** (consumer audit
+  open, no recovery path for `settlement_reserved`/`settlement_failed`).
+- t_89dcb160 (Fiat settlement state machine) = `ready`, UNSTARTED, no branch.
+- This card therefore branches from `fix/gate-money-safety` (b35b916) so the
+  money path is enforced by the durable claim that fix introduces, and adds the
+  piece the review's [HIGH] finding asks for: a durable, reply-driven, escalated
+  escape hatch. No second gate is created: `ExplicitGate` remains the only
+  decision about whether the sats were paid.
 
----
+## Clusters
+1. [x] kit: `src/fiat-intent.ts` + `src/fiat-store.ts` + `src/escalation.ts` +
+       `src/fiat-path.ts` + `src/fiat-path.test.ts` (17 tests) — bun suite
+       184 pass / 0 fail, `tsc --noEmit` clean.
+2. [ ] cvm-2fiat: `card.pay_checkout` tool wired owner-first + gate-downstream,
+       service RED test (tool absent) then GREEN, contract text.
+3. [ ] private 2fiat-local-adapter: implement `pay_checkout` + tests.
+4. [ ] REPORT.md + evidence (RED before/after, human step statement).
 
-## Other PROGRESS entries brought in from main (unrelated to the tier task)
-
-2026-10-09: identified both orphaned pin sites on origin/main → fixed to reachable squash merge SHA → deploy wrapper/defaults edited.
-2026-10-09: ancestor and fresh clone checkout probes passed → commit 415ef51 pushed to GitHub branch.
+## Worktrees
+- kit: /home/c03rad0r/worktrees/t_63be63f1/kit  (branch worker-base/t_63be63f1-kit, base fix/gate-money-safety)
+- adapter: /home/c03rad0r/worktrees/t_63be63f1/2fiat (branch worker-base/t_63be63f1)
+- node_modules symlinked from ~/repos/cvm-service-kit (gitignored in the worktree)
