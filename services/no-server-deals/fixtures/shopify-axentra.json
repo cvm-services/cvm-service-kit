@@ -1,0 +1,64 @@
+{
+ "products": [
+  {
+   "id": 9393645682924,
+   "title": "Dell PowerEdge T630 - 16x SFF",
+   "handle": "brukt-dell-poweredge-t630",
+   "vendor": "Dell",
+   "product_type": "Server",
+   "body_html": " Dette inngår i fra-prisen: Basiskonfigurasjonen har 64 GB RAM. Mer RAM og andre tilvalg prises i konfiguratoren eller i et skriftlig tilbud. Totalprisen gjelder de valgte delene; oppgitt maksimal kapasitet er ikke inkludert utstyr. Brukt Dell PowerEdge T630 med 16 x 2,5\" hot swap-diskbrønner – en romslig og stillegående 5U tower-server med to CPU-sokler og god plass til å vokse. Basiskonfigurasjo",
+   "variants": [
+    {
+     "id": 48233284141292,
+     "price": "16900.00",
+     "available": true
+    }
+   ]
+  },
+  {
+   "id": 9389073006828,
+   "title": "Lenovo ThinkSystem SR630 Server - 8x SFF",
+   "handle": "brukt-lenovo-thinksystem-sr630",
+   "vendor": "Lenovo",
+   "product_type": "Server",
+   "body_html": " Dette inngår i fra-prisen: Basiskonfigurasjonen har 64 GB RAM. Mer RAM og andre tilvalg prises i konfiguratoren eller i et skriftlig tilbud. Totalprisen gjelder de valgte delene; oppgitt maksimal kapasitet er ikke inkludert utstyr. Brukt Lenovo ThinkSystem SR630 – en 1U rackserver som bygges etter ditt behov. Standardkonfigurasjonen er 1 x Intel Xeon Gold 6140 og 64 GB DDR4-2666 ECC; prosessor, a",
+   "variants": [
+    {
+     "id": 48214889988332,
+     "price": "14500.00",
+     "available": true
+    }
+   ]
+  },
+  {
+   "id": 9389072974060,
+   "title": "Lenovo ThinkSystem SR650 Server - 24x SFF",
+   "handle": "brukt-lenovo-thinksystem-sr650",
+   "vendor": "Lenovo",
+   "product_type": "Server",
+   "body_html": " Dette inngår i fra-prisen: Basiskonfigurasjonen har 64 GB RAM. Mer RAM og andre tilvalg prises i konfiguratoren eller i et skriftlig tilbud. Totalprisen gjelder de valgte delene; oppgitt maksimal kapasitet er ikke inkludert utstyr. Brukt Lenovo ThinkSystem SR650 – en 2U rackserver som bygges etter ditt behov. Standardkonfigurasjonen er 1 x Intel Xeon Gold 6140 og 64 GB DDR4-2666 ECC; prosessor, a",
+   "variants": [
+    {
+     "id": 48214889955564,
+     "price": "14500.00",
+     "available": true
+    }
+   ]
+  },
+  {
+   "id": 9180537913580,
+   "title": "Dell Networking S4048-ON – 48 × 10G SFP+ + 6 × 40G QSFP+ – ToR-switch Brukt",
+   "handle": "dell-networking-s4048-on-48-10g-sfp-6-40g-qsfp-tor-switch-brukt",
+   "vendor": "Dell",
+   "product_type": "Switch",
+   "body_html": " Dell Networking S4048-ON er en allsidig Top-of-Rack-switch med 48 × 10GbE SFP+-porter og 6 × 40GbE QSFP+-uplinks – et solid valg for servertilkobling, virtualisering, lagring og høyhastighets backbone i moderne rackmiljøer. 48 × 10G SFP+ 6 × 40G QSFP+ 1,44 Tbps fabric L3 BGP / OSPF ONIE-støtte Dual PSU hot-swap Ytelse og portkapasitet S4048-ON er bygget for høy porttetthet og lav latenstid i data",
+   "variants": [
+    {
+     "id": 47371119395052,
+     "price": "6250.00",
+     "available": true
+    }
+   ]
+  }
+ ]
+}

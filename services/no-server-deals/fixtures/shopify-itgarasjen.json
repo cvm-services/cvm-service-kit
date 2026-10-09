@@ -1,0 +1,79 @@
+{
+ "products": [
+  {
+   "id": 10464722714907,
+   "title": "Dell PowerEdge R840 4× Xeon Gold 6240 | 768GB RAM | 2×480GB SSD | 3 års garanti",
+   "handle": "dell-poweredge-r840-4-xeon-gold-6240-768gb-ram-2-480gb-ssd-3-ars-garanti",
+   "vendor": "Dell",
+   "product_type": "Server",
+   "body_html": " a { text-decoration: none; color: #464feb; } tr th, tr td { border: 1px solid #e6e6e6; } tr th { background-color: #f5f5f5; } Kr 69.900,- eks. mva Kr 87.375,- inkl. mva 3 års garanti inkludert Dell PowerEdge R840 er en kraftig 2U rackserver utviklet for virksomhetskritiske miljøer, virtualisering, databaser og andre ressurskrevende arbeidslaster. Denne serveren er konfigurert med fire Intel Xeon ",
+   "variants": [
+    {
+     "id": 53982638342427,
+     "price": "87375.00",
+     "available": true
+    }
+   ]
+  },
+  {
+   "id": 10461762191643,
+   "title": "HPE ProLiant DL380 Gen10 24SFF – 36 kjerner, 768GB RAM, 25GbE, FC SAN",
+   "handle": "hpe-proliant-dl380-gen10-24sff-36-kjerner-768gb-ram-25gbe-fc-san",
+   "vendor": "Hpe",
+   "product_type": "Server",
+   "body_html": " Pris: 75.000 kr eks. mva Garanti: 3 år inkludert Ekstremt kraftig enterprise-server fra HPE, konfigurert for virtualisering, databaser, lagring og forretningskritiske applikasjoner. Serveren leveres med høy minnekapasitet, rask SAN-tilkobling og redundante strømforsyninger. Spesifikasjoner Modell: HPE ProLiant DL380 Gen10 Prosessorer: 2 × Intel Xeon Gold 6254 Kjerner: 36 kjerner / 72 tråder total",
+   "variants": [
+    {
+     "id": 53958582468891,
+     "price": "93750.00",
+     "available": true
+    }
+   ]
+  },
+  {
+   "id": 10440284930331,
+   "title": "Dell PowerEdge R740xd — 12×3.5\" chassis (konfigurerbar)",
+   "handle": "dell-poweredge-r740xd-12-3-5-chassis-konfigurerbar",
+   "vendor": "Dell",
+   "product_type": "Server",
+   "body_html": "",
+   "variants": [
+    {
+     "id": 53906034721051,
+     "price": "8000.00",
+     "available": true
+    }
+   ]
+  },
+  {
+   "id": 10496687472923,
+   "title": "Cisco WS-C2960S-48FPS-L 48-Port Gigabit PoE+ Switch",
+   "handle": "cisco-ws-c2960s-48fps-l-48-port-gigabit-poe-switch",
+   "vendor": "Cisco",
+   "product_type": "Switch",
+   "body_html": " a { text-decoration: none; color: #464feb; } tr th, tr td { border: 1px solid #e6e6e6; } tr th { background-color: #f5f5f5; } Brukt Cisco Catalyst 2960S-48FPS-L administrerbar nettverkssvitsj med 48 Gigabit Ethernet-porter, PoE+, 4 SFP-uplinkporter og installert FlexStack-modul for stabling av flere svitsjer. Spesifikasjoner 48 x 10/100/1000 Mbps RJ45-porter PoE+ med opptil 740W totalt effektbuds",
+   "variants": [
+    {
+     "id": 54132742848795,
+     "price": "1290.00",
+     "available": true
+    }
+   ]
+  },
+  {
+   "id": 10304814317851,
+   "title": "Lenovo måned med opp til 50% rabatt!",
+   "handle": "lenovo-maned-med-opp-til-50-rabatt",
+   "vendor": "Lenovo",
+   "product_type": "Laptop",
+   "body_html": " ",
+   "variants": [
+    {
+     "id": 52482347368731,
+     "price": "0.00",
+     "available": false
+    }
+   ]
+  }
+ ]
+}
