@@ -19,6 +19,8 @@
 export const REFUSAL_LIST: readonly string[] = [
   "REFUSED card.details: no tool will ever disclose a card number, CVV, expiry or last-4. The service-input register has no field for card material, and a PAN is a bearer instrument and an authentication factor at once.",
   "REFUSED payment.authorize / charge: there is no authorize endpoint on the issuer portal, human 3DS/SCA is mandatory, and the transport has no replay protection - one captured gift wrap would be a repeated charge.",
+  "REFUSED card.pay_checkout unless BOTH hold: the caller is the owner key, AND the caller's sats payment has settled. The fiat leg is entered at most once per settlement, so a replayed (captured) gift wrap is refused by the state machine rather than becoming a second charge.",
+  "REFUSED card.pay_checkout for an unattended charge: the last step is always a human - 3DS/SCA and the 2fiat OTP at the venue's hosted page. There is no autonomous fiat payment anywhere in this service.",
   "REFUSED card.create: issuing a card is a purchase, not a read; this service does not spend.",
   "REFUSED card.fund: funding drains a wallet; this service does not spend.",
 ];

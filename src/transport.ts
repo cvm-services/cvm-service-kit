@@ -307,6 +307,18 @@ export class CvmServer {
     await this.publishToAll(event, `publish ${args.kind} failed`);
     return event;
   }
+
+  /**
+   * Publish an event that is ALREADY signed, byte-for-byte as given.
+   *
+   * The ADR-0012 escalation DM is a kind-1059 gift wrap signed by its own
+   * ephemeral wrap key: re-signing it with the server key (as publish() does)
+   * would change its pubkey and break the recipient's decryption. Never use
+   * this for anything the server is supposed to author itself.
+   */
+  async publishSignedEvent(event: Event): Promise<void> {
+    await this.publishToAll(event, `publish ${event.kind} failed`);
+  }
 }
 
 function ok(id: unknown, result: unknown) {

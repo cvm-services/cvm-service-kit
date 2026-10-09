@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { finalizeEvent, getPublicKey, verifyEvent } from "nostr-tools";
 import { CvmServer, pubkeyHexOf, secretKeyFrom } from "./transport.ts";
 import { PaymentRequiredError } from "./payment.ts";
 import type { RelayLike } from "./types.ts";
@@ -252,6 +253,70 @@ describe("publish: a never-answering relay must not starve a healthy one", () =>
     await (server as any).sendGiftWrapped({ id: 2 }, RECIPIENT_PK);
     expect(logs.filter((l) => l.includes("sync boom")).length).toBe(2);
     expect(healthy.length).toBe(2);
+  });
+});
+
+describe("publishSignedEvent: the ADR-0012 escalation transport", () => {
+  async function started(relayPublish: (ev: unknown) => Promise<unknown>) {
+    const seen: unknown[] = [];
+    const relay: RelayLike = {
+      publish: (ev: unknown) => {
+        seen.push(ev);
+        return relayPublish(ev);
+      },
+      subscribe: () => ({ close: () => {} }),
+      close: () => {},
+    };
+    const logs: string[] = [];
+    const server = new CvmServer({
+      secretKey: "03".repeat(32),
+      relays: ["wss://escalation.example"],
+      name: "escalation-test",
+      tools: [],
+      onLog: (l) => logs.push(l),
+      publishTimeoutMs: 25,
+    });
+    const realConnect = Relay.connect;
+    Relay.connect = () => Promise.resolve(relay) as unknown as Promise<Relay>;
+    try {
+      await server.start();
+    } finally {
+      Relay.connect = realConnect;
+    }
+    return { server, seen, logs };
+  }
+
+  test("an already-signed gift wrap goes out verbatim (publish() would re-sign it)", async () => {
+    const wrapSk = new Uint8Array(32).fill(11);
+    const wrap = finalizeEvent(
+      {
+        kind: 1059,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [["p", RECIPIENT_PK]],
+        content: "nip44-ciphertext",
+      },
+      wrapSk,
+    );
+    const { server, seen } = await started(() => Promise.resolve({}));
+    await server.publishSignedEvent(wrap);
+    expect(seen.length).toBe(1);
+    const out = seen[0] as typeof wrap;
+    // Byte-for-byte: the wrap key's signature survives, so the recipient can
+    // still derive the conversation key and decrypt.
+    expect(out.id).toBe(wrap.id);
+    expect(out.pubkey).toBe(getPublicKey(wrapSk));
+    expect(out.sig).toBe(wrap.sig);
+    expect(verifyEvent(out)).toBe(true);
+  });
+
+  test("a relay failure while publishing an escalation is logged, not thrown", async () => {
+    const wrap = finalizeEvent(
+      { kind: 1059, created_at: Math.floor(Date.now() / 1000), tags: [["p", RECIPIENT_PK]], content: "c" },
+      new Uint8Array(32).fill(12),
+    );
+    const { server, logs } = await started(() => Promise.reject(new Error("relay down")));
+    await server.publishSignedEvent(wrap);
+    expect(logs.filter((l) => l.includes("relay down")).length).toBe(1);
   });
 });
 
