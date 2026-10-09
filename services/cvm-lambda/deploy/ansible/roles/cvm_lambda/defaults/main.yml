@@ -39,7 +39,9 @@ cvm_lambda_artifacts_dir: "{{ lookup('env', 'HOME') }}/.cache/cvm-lambda/artifac
 
 # --- Rootfs ---
 # The guest is Ubuntu 24.04 + python3/node/bash/golang/rustc + loom-vsock-agent.
-rootfs_size_gib: 5
+# Trimmed (no docker/ffmpeg/ngit/nak/act) so a smaller image copies faster on
+# VM recycle and uses less disk.
+rootfs_size_gib: 3
 
 # --- VM pool (small host) ---
 adapter_pool_size: 1

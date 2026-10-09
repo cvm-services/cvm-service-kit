@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   costToClient,
+  refuse,
   type ExplicitGate,
   type LnWallet,
   type OrderStore,
@@ -12,11 +13,15 @@ import type { Sms4SatsClient } from "./upstream.ts";
 
 export interface SmsDeps {
   client: Sms4SatsClient;
-  wallet: LnWallet;
+  /** Real wallet, or undefined when the treasury rail is not configured. */
+  wallet?: LnWallet;
   treasury: Treasury;
   orders: OrderStore;
   pricing: PricingConfig;
-  gate: ExplicitGate;
+  /** Omit to run in free mode (no client payment gate). */
+  gate?: ExplicitGate;
+  /** Which wallet rail this host expects ("nwc"). Stated in refusals. */
+  rail?: "nwc";
   poll?: { intervalMs?: number; attempts?: number };
 }
 
@@ -25,6 +30,25 @@ function deriveOrderId(caller: string, args: Record<string, unknown>): string {
     .update(`${caller}\n${args.country}\n${args.service}\n${args.type ?? "receive-sms"}`)
     .digest("hex")
     .slice(0, 32);
+}
+
+/**
+ * Health/availability payload for the treasury. States a balance ONLY when a
+ * real wallet answered; with no rail configured it reports rail_unavailable
+ * and no treasury_balance_sats key is emitted (never a fabricated number).
+ */
+export async function treasuryHealthReport(
+  treasury: Treasury,
+  minPriceSats: number,
+  rail: "nwc" = "nwc",
+): Promise<{ status: string; rail?: string; treasury_balance_sats?: number }> {
+  if (!treasury.railConfigured) {
+    return { status: "rail_unavailable", rail };
+  }
+  return {
+    status: (await treasury.canSpend(minPriceSats)) ? "ok" : "low_treasury",
+    treasury_balance_sats: await treasury.balanceSats(),
+  };
 }
 
 export function buildSmsTools(d: SmsDeps): Tool[] {
@@ -38,9 +62,8 @@ export function buildSmsTools(d: SmsDeps): Tool[] {
       inputSchema: { type: "object", properties: {} },
     },
     handler: async () => {
-      const balance = await d.treasury.balanceSats();
-      const ok = await d.treasury.canSpend(d.pricing.minSats);
-      return { status: ok ? "ok" : "low_treasury", treasury_balance_sats: balance };
+      // Same contract as the health endpoint: no fabricated balance.
+      return treasuryHealthReport(d.treasury, d.pricing.minSats, d.rail ?? "nwc");
     },
   };
 
@@ -83,27 +106,51 @@ export function buildSmsTools(d: SmsDeps): Tool[] {
       priceSats: undefined, // variable price; see payment_required response
       inputSchema: {
         type: "object",
-        required: ["service"],
+        required: ["service", "refund_invoice"],
         properties: {
           service: { type: "string", description: "service code, e.g. tg" },
+          type: {
+            type: "string",
+            enum: ["receive-sms", "rent-number"],
+            description: "order type (default receive-sms)",
+          },
           country: { type: "string", description: "ISO code or 'auto'" },
-          refund_invoice: { type: "string", description: "no-amount BOLT11 for refunds" },
+          duration_minutes: { type: "number", description: "rent-number duration" },
+          refund_invoice: {
+            type: "string",
+            description: "no-amount BOLT11 valid >=30 min (required by sms4sats for all order types)",
+          },
           order_id: { type: "string", description: "idempotency key" },
           cashu_token: { type: "string", description: "Cashu token proving payment" },
         },
       },
     },
     handler: async (args, ctx) => {
+      // Rail check FIRST: with no wallet configured this tool must refuse
+      // before it mints an upstream order — never half-sell an order it
+      // cannot pay for, never fake the upstream payment.
+      if (!d.treasury.railConfigured) {
+        refuse("rail_unavailable", { rail: d.rail ?? "nwc" });
+      }
+
       const orderId = orderIdFor(ctx.caller, args);
+      const type = String(args.type ?? "receive-sms");
+      if (typeof args.refund_invoice !== "string" || args.refund_invoice.length === 0) {
+        throw new Error("refund_invoice is required (a no-amount BOLT11 valid for >=30 min)");
+      }
 
       let order = d.orders.get(orderId);
       if (!order) {
-        const quote = await d.client.requestOrder({
-          type: "receive-sms",
+        const body: Record<string, unknown> = {
+          type,
           country: args.country ?? "auto",
           service: args.service,
-          ...(args.refund_invoice ? { refundInvoice: args.refund_invoice } : {}),
-        });
+          refundInvoice: args.refund_invoice,
+        };
+        if (type === "rent-number" && args.duration_minutes) {
+          body.durationMinutes = Number(args.duration_minutes);
+        }
+        const quote = await d.client.requestOrder(body);
         if (quote.status !== 402 || !quote.challenge || !quote.orderId) {
           throw new Error(`upstream rejected order: ${JSON.stringify(quote.raw)}`);
         }
@@ -129,29 +176,32 @@ export function buildSmsTools(d: SmsDeps): Tool[] {
       await d.treasury.assertCanSpend(order.costSats ?? 0);
       const upstream = JSON.parse(order.upstreamRef!);
 
+      const run = async () => {
+        d.treasury.recordSpend(order!.costSats ?? 0);
+        d.orders.update(orderId, { status: "fulfilling" });
+        const res = await d.client.payAndPoll(
+          upstream.orderId,
+          { macaroon: upstream.macaroon, invoice: upstream.invoice },
+          d.wallet!, // railConfigured asserted above, before the order was minted
+          d.poll,
+        );
+        const done = res?.status === "completed" || res?.status === "code_received";
+        d.orders.update(orderId, {
+          status: done ? "fulfilled" : "failed",
+          resultJson: JSON.stringify(res),
+          error: done ? null : (res?.status ?? "unknown"),
+        });
+        return res;
+      };
+
+      if (!d.gate) return run();
       return d.gate.gate({
         tool: "create_sms_order",
         caller: ctx.caller,
         amountSats: order.priceSats,
         orderId,
         proof: typeof args.cashu_token === "string" ? args.cashu_token : undefined,
-        run: async () => {
-          d.treasury.recordSpend(order!.costSats ?? 0);
-          d.orders.update(orderId, { status: "fulfilling" });
-          const res = await d.client.payAndPoll(
-            upstream.orderId,
-            { macaroon: upstream.macaroon, invoice: upstream.invoice },
-            d.wallet,
-            d.poll,
-          );
-          const done = res?.status === "completed" || res?.status === "code_received";
-          d.orders.update(orderId, {
-            status: done ? "fulfilled" : "failed",
-            resultJson: JSON.stringify(res),
-            error: done ? null : (res?.status ?? "unknown"),
-          });
-          return res;
-        },
+        run,
       });
     },
   };

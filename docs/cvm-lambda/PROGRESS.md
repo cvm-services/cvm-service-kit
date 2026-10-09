@@ -90,7 +90,7 @@ Hosts: **vps2** = `debian@23.182.128.51` (nested KVM), **controller** = T14Gen5.
 - [x] `cap` parsing/validation; `pmi=bitcoin-cashu` advertised
 - [x] `explicit_gating` helper + idempotent order store (replay does not re-run)
 - [x] `PaymentRequiredError` → JSON-RPC `payment_required` error
-- [x] `CashuProcessor` (cashu-ts v2): refunds the token **face value** (mint swap
+- [x] `CashuProcessor` (cashu-ts v4): refunds the token **face value** (mint swap
       fee is the server's cost, not the payer's underpayment)
 - [x] `PRICE_RUN_CODE_SATS=2`, `PAYMENT_MODE=cashu`, mint `testnut.cashu.exchange`
 - [x] Config/secret split: managed `config.env` + write-once `secret.env`

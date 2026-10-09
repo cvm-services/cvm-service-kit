@@ -18,3 +18,10 @@
   `tier?: string` from AnnounceOptions; computeTier error message updated.
 - bun test 81/0, bun typecheck rc=0, deno check rc=0, deno test 24/0.
 - Files: src/announce.ts, src/types.ts, src/announce.test.ts
+
+---
+
+## Other PROGRESS entries brought in from main (unrelated to the tier task)
+
+2026-10-09: identified both orphaned pin sites on origin/main → fixed to reachable squash merge SHA → deploy wrapper/defaults edited.
+2026-10-09: ancestor and fresh clone checkout probes passed → commit 415ef51 pushed to GitHub branch.

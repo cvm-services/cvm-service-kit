@@ -2,20 +2,19 @@ import {
   CashuProcessor,
   CvmServer,
   ExplicitGate,
-  FakeLnWallet,
-  NwcLnWallet,
   SqliteOrderStore,
   Treasury,
   markupForMargin,
   publishAnnouncement,
   pubkeyHexOf,
   secretKeyFrom,
-  type LnWallet,
+  walletFromEnv,
   type PaymentProcessor,
 } from "../../../src/index.ts";
 import { startHealthServer } from "../../_shared/health.ts";
+import { resolveDeployedCommit, resolveDeployedRef } from "../../_shared/start.ts";
 import { Sms4SatsClient } from "./upstream.ts";
-import { buildSmsTools } from "./tools.ts";
+import { buildSmsTools, treasuryHealthReport, type SmsDeps } from "./tools.ts";
 
 const RELAYS_DEFAULT = [
   "wss://nostr.mom",
@@ -39,6 +38,17 @@ interface Config {
   d: string;
   serviceClass: string;
   sms4satsBase: string;
+}
+
+/** PAYMENT_MODE=none refuses every payment rather than faking settlement. */
+class FakeProcessorNone {
+  readonly pmi = "none";
+  async createInvoice(a: { orderId: string; amountSats: number }) {
+    throw new Error("payment mode none: refusing to mint a client invoice");
+  }
+  async verify(): Promise<boolean> {
+    return false;
+  }
 }
 
 function configFromEnv(env: Record<string, string | undefined>): Config {
@@ -65,27 +75,33 @@ async function main() {
   const cfg = configFromEnv(process.env);
   const sk = secretKeyFrom(cfg.secretKey);
 
-  const wallet: LnWallet = cfg.nwcUrl ? new NwcLnWallet(cfg.nwcUrl) : new FakeLnWallet();
-  if (!cfg.nwcUrl) {
-    console.error("[cvm-sms4sats] WARNING: no NWC_URL — using FakeLnWallet (dev only)");
+  // Real wallet or NO wallet — never a fake one in production. With no rail
+  // configured the paid path refuses rail_unavailable and availability/health
+  // report the rail as unavailable instead of a fabricated balance.
+  const sel = walletFromEnv({ NWC_URL: cfg.nwcUrl });
+  if (!sel.real) {
+    console.error(
+      "[cvm-sms4sats] WARNING: no NWC_URL — treasury rail unavailable; paid tools will refuse rail_unavailable",
+    );
   }
 
-  const treasury = new Treasury(wallet, { floorSats: cfg.floorSats });
+  const treasury = new Treasury(sel.wallet, { floorSats: cfg.floorSats });
   const orders = new SqliteOrderStore(cfg.orderDb);
   const processor: PaymentProcessor =
     cfg.paymentMode === "cashu"
       ? new CashuProcessor({ mintUrl: cfg.cashuMintUrl })
-      : (new FakeLnWallet() as unknown as PaymentProcessor);
+      : (new FakeProcessorNone() as unknown as PaymentProcessor);
   const gate = new ExplicitGate(processor);
   const client = new Sms4SatsClient({ baseUrl: cfg.sms4satsBase });
 
   const tools = buildSmsTools({
     client,
-    wallet,
+    wallet: sel.wallet,
     treasury,
     orders,
     pricing: { markup: markupForMargin(cfg.margin), minSats: cfg.minPriceSats },
     gate,
+    rail: sel.rail,
   });
 
   const server = new CvmServer({
@@ -103,10 +119,9 @@ async function main() {
     startHealthServer({
       service: "cvm-sms4sats",
       port: healthPort,
-      report: async () => ({
-        status: (await treasury.canSpend(cfg.minPriceSats)) ? "ok" : "low_treasury",
-        treasury_balance_sats: await treasury.balanceSats(),
-      }),
+      commit: resolveDeployedCommit(process.env),
+      ref: resolveDeployedRef(process.env),
+      report: async () => treasuryHealthReport(treasury, cfg.minPriceSats, sel.rail),
     });
   }
 

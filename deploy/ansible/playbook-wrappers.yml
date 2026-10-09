@@ -1,20 +1,51 @@
 ---
 # Deploy the ContextVM service wrappers.
 #
-# Staging note: ANNOUNCE=false until the treasury NWC wallet + upstream keys are
-# supplied. Flip to "true" (and set the secrets) to publish to CEP-6 discovery.
+# Staging note: ANNOUNCE=false until the treasury (NWC/real ecash) + upstream
+# keys are supplied. Flip to "true" (and set the secrets) to publish via CEP-6.
 #
 #   cd deploy/ansible
 #   ansible-playbook playbook-wrappers.yml
+#
+# Real treasury (pass from the vault, e.g. -e @vault-treasury.yml):
+#   sms_treasury_backend: nwc | cashu
+#   sms_nwc_url: "nostr+walletconnect://…"
+#   sms_cashu_treasury_mint_url: "https://mint.minibits.cash/Bitcoin"
+#   sms_cashu_seed: "<64-hex>"
 - name: Deploy ContextVM service wrappers
   hosts: executor
   become: true
   vars:
     common_relays: "wss://nostr.mom,wss://relay.primal.net,wss://nos.lol,wss://relay2.contextvm.org,wss://relay2.orangesync.tech"
+    # Vault-sourced secrets (fleet vault, read path fleet/*). Values are
+    # supplied at INVOKE time from the operator's vault — NEVER committed:
+    #   ansible-playbook playbook-wrappers.yml \
+    #     -e @/root/vault-cvm.yml   # cvm_nwc_url: nostr+walletconnect://…
+    # The role fails the deploy loudly if a required secret is empty.
+    # Operator one-time setup (nodes hold no write capability):
+    #   bao kv put secret/fleet/cvm-nwc nwc_url='<nostr+walletconnect://…>'
+    cvm_nwc_url: ""
+    wrappers_secrets:
+      cvm-sms4sats:
+        NWC_URL: "{{ cvm_nwc_url }}"
+    sms_treasury_backend: "fake"
+    sms_nwc_url: ""
+    sms_cashu_treasury_mint_url: ""
+    sms_cashu_seed: ""
+    sms_secrets:
+      NWC_URL: "{{ sms_nwc_url }}"
+      CASHU_TREASURY_MINT_URL: "{{ sms_cashu_treasury_mint_url }}"
+      CASHU_WALLET_SEED: "{{ sms_cashu_seed }}"
+    # Pin the deployed source. A full SHA (or tag) makes every deploy
+    # reproducible; "main" deploys whatever the branch points at that day.
+    # Rollback = set this to the previous SHA and re-run.
+    cvm_kit_version: "c2b1cbcb31c9549cff0665130a8c3ac5a2cd7cfa" # squash-merge SHA for PR #8; update deliberately for rollback/release changes
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts
         state_dir: /var/lib/loom/cvm-sms4sats
+        health_port: 8781
+        secrets: "{{ sms_secrets }}"
         config:
           RELAYS: "{{ common_relays }}"
           ANNOUNCE: "false"
@@ -22,14 +53,17 @@
           SERVICE_CLASS: sms
           PAYMENT_MODE: cashu
           CASHU_MINT_URL: https://testnut.cashu.exchange
+          TREASURY_BACKEND: "{{ sms_treasury_backend }}"
           MARGIN: "0.2"
           MIN_PRICE_SATS: "1"
           TREASURY_FLOOR_SATS: "1000"
           ORDER_DB: /var/lib/loom/cvm-sms4sats/orders.sqlite
+          CASHU_WALLET_DB: /var/lib/loom/cvm-sms4sats/cashu.sqlite
           HEALTH_PORT: "8781"
       - name: cvm-nanogpt
         script: services/cvm-nanogpt/src/server.ts
         state_dir: /var/lib/loom/cvm-nanogpt
+        health_port: 8782
         config:
           RELAYS: "{{ common_relays }}"
           ANNOUNCE: "false"
@@ -45,6 +79,7 @@
       - name: cvm-ppq
         script: services/cvm-ppq/src/server.ts
         state_dir: /var/lib/loom/cvm-ppq
+        health_port: 8783
         config:
           RELAYS: "{{ common_relays }}"
           ANNOUNCE: "false"
@@ -57,6 +92,24 @@
           DEFAULT_MODEL: deepseek/deepseek-v3.2
           GATE_DB: /var/lib/loom/cvm-ppq/gate.sqlite
           HEALTH_PORT: "8783"
+      - name: cvm-2fiat
+        script: services/cvm-2fiat/src/server.ts
+        state_dir: /var/lib/loom/cvm-2fiat
+        # ANNOUNCE stays false until the announce card says go. Secret values
+        # (SERVER_SECRET_KEY, OWNER_NPUB_HEX, ADAPTER_URL) are written ONCE by
+        # the role's secret.env template, sourced from the fleet vault —
+        # /etc/cvm-2fiat/secret.env, mode 0600. Never put a value here.
+        config:
+          RELAYS: "{{ common_relays }}"
+          ANNOUNCE: "false"
+          ANNOUNCE_D: cvm-2fiat-01
+          SERVICE_CLASS: payment-rail
+          PAYMENT_MODE: "none"
+          PRICE_BALANCE_SATS: "0"
+          GATE_DB: /var/lib/loom/cvm-2fiat/gate.sqlite
+          RATE_CAPACITY: "10"
+          RATE_REFILL_PER_SEC: "1"
+          HEALTH_PORT: "8784"
   tasks:
     - name: Deploy each wrapper
       ansible.builtin.include_role:
@@ -66,4 +119,7 @@
         cvm_service_script: "{{ item.script }}"
         cvm_service_config: "{{ item.config }}"
         cvm_service_state_dir: "{{ item.state_dir }}"
+        cvm_service_health_port: "{{ item.health_port | default(0) }}"
+        cvm_service_secrets: "{{ wrappers_secrets[item.name] | default(item.secrets | default({})) }}"
+        cvm_service_require_secrets: "{{ (wrappers_secrets[item.name] | default({})).keys() | list }}"
       loop: "{{ wrappers }}"

@@ -88,10 +88,11 @@
   exiting firecracker). `loom-adapter-recycle.patch` makes `kill_vm` wait for
   exit and remove `vsock.sock`; recycle now succeeds (`VM pool-0 recycled`).
   Verified with `adapter_max_age=0` (recycle after every release).
-- **Slow recycle (~37 s).** The adapter COW-copies the 5 GB rootfs on recycle
-  (ext4 has no reflink), leaving the pool empty for ~37 s. At the default hourly
-  `max_age` this is a rare blip; shrinking the rootfs (drop docker/ffmpeg) would
-  cut it. Follow-up.
+- **Slow recycle (reduced).** The adapter COW-copies the rootfs on recycle
+  (ext4 has no reflink). The image was trimmed from 5 GiB to **3 GiB** (dropped
+  docker/ffmpeg/ngit/nak/act), cutting the copy to ~22 s and freeing ~2 GB of
+  disk. Verified: trimmed image boots and runs python3/node/go/rustc (4/4 PASS).
+  At the hourly `max_age` default the empty-pool window is a rare blip.
 
 ## Open items / decisions
 
@@ -111,3 +112,4 @@
 | 2026-10-06 | Phase 5 | durable gate store + rate limiter wired into cvm-lambda |
 | 2026-10-06 | Phase 0/5 | generic `cvm_service` Ansible role; wrappers deployed staging; egress deny; admission queue |
 | 2026-10-06 | ops | adapter recycle fix (vsock cleanup) verified with max_age=0; executor 4/4 PASS at default |
+| 2026-10-06 | Treasury | `CashuLnWallet` + proof store; mock L402 harness; wallet factory; full pipeline over CVM → `code=1234` (see `TREASURY.md`) |
