@@ -1,0 +1,16 @@
+bun test v1.4.2 (744846f84)
+
+services/cvm-2fiat/src/fiat.test.ts:
+(pass) 1. the surface > card.pay_checkout is advertised and accepts no card field [0.39ms]
+(pass) 1. the surface > a non-owner caller is refused BEFORE the adapter or the gate is reached [0.49ms]
+(pass) 2. unpaid call: refused, adapter NOT entered > an unpaid call is refused and the adapter is never entered [0.79ms]
+(pass) 3. settled call: adapter entered exactly once > a settled call completes and enters the adapter once [12.82ms]
+(pass) 3. settled call: adapter entered exactly once > concurrent settled calls enter the adapter exactly once [0.45ms]
+(pass) 4. settled then failed fiat leg > the failure is terminal, escalated once, and never retried into the adapter [0.82ms]
+(pass) 5. fail closed when unconfigured > no fiat path configured -> rail_unavailable, never a fabricated outcome [0.09ms]
+(pass) 5. fail closed when unconfigured > no gate configured -> rail_unavailable (the sats must be verifiable, or nothing happens) [0.12ms]
+
+ 8 pass
+ 0 fail
+ 32 expect() calls
+Ran 8 tests across 1 file. [128.00ms]

@@ -1,0 +1,26 @@
+bun test v1.4.2 (744846f84)
+
+src/fiat-path.test.ts:
+(pass) 1. unpaid call: refused, adapter NOT entered > an unpaid call is refused and the adapter is never entered [3.30ms]
+(pass) 1. unpaid call: refused, adapter NOT entered > the refusal is the state machine's own protocol error (no second gate) [0.32ms]
+(pass) 2. settled call: adapter entered exactly once > a settled call enters the adapter once and records the outcome [1.17ms]
+(pass) 2. settled call: adapter entered exactly once > concurrent settled calls enter the adapter exactly once [0.88ms]
+(pass) 2. settled call: adapter entered exactly once > replaying a settled call returns the recorded outcome without re-entering the adapter [0.55ms]
+(pass) 2. settled call: adapter entered exactly once > an intent id may not be re-used for a different quote [0.50ms]
+(pass) 3. settled then failed fiat leg: terminal + escalation, never a second attempt > a failed fiat leg is terminal, escalates once, and is never retried into a second attempt [2.05ms]
+(pass) 3. settled then failed fiat leg: terminal + escalation, never a second attempt > an adapter that reports failed (not throws) is equally terminal [0.26ms]
+(pass) 3. settled then failed fiat leg: terminal + escalation, never a second attempt > human_required is not a failure: no escalation, and the retry is refused without a second attempt [0.36ms]
+(pass) 4. restart-safe, and durable escalation > a restart does not restore a spent intent (sqlite stores, one payment = one attempt) [685.07ms]
+(pass) 4. restart-safe, and durable escalation > the bounded-window sweep alerts an unresolved intent once and is idempotent [16.65ms]
+(pass) 4. restart-safe, and durable escalation > sats settled but no fiat action yet (crash) is escalated by the sweep, never re-run [0.28ms]
+(pass) 5. operator replies are inputs to durable state, never actions > 'refunded' resolves the intent terminally; the adapter is never re-entered [0.51ms]
+(pass) 5. operator replies are inputs to durable state, never actions > a reply asking for another attempt is refused and escalated as a duplicate attempt [0.22ms]
+(pass) 5. operator replies are inputs to durable state, never actions > a reply from anyone but the operator is refused [0.14ms]
+(pass) 7. the escalation DM itself (ADR-0012 transport) > a terminal fiat failure produces a kind-1059 DM the operator can decrypt, carrying every required field [71.65ms]
+(pass) 6. nothing card-shaped reaches the escalation DM > a credential-shaped failure string is redacted before it is escalated [0.26ms]
+(pass) 6. nothing card-shaped reaches the escalation DM > the escalator refuses outright if card material survives into the notice [0.14ms]
+
+ 18 pass
+ 0 fail
+ 103 expect() calls
+Ran 18 tests across 1 file. [860.00ms]

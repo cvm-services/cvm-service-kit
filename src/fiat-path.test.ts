@@ -14,6 +14,7 @@
  *  4. restart-safe, and nothing card-shaped ever reaches the escalation DM
  */
 import { describe, expect, test } from "bun:test";
+import { finalizeEvent, getPublicKey, nip44, verifyEvent } from "nostr-tools";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,7 +42,7 @@ import {
   type FiatIntentStore,
 } from "./fiat-intent.ts";
 import { SqliteFiatIntentStore } from "./fiat-store.ts";
-import { CardMaterialInEscalationError, RecordingEscalator } from "./escalation.ts";
+import { CardMaterialInEscalationError, NostrDmEscalator, RecordingEscalator } from "./escalation.ts";
 
 const OPERATOR = "b".repeat(64);
 const CALLER = "a".repeat(64);
@@ -367,6 +368,50 @@ describe("5. operator replies are inputs to durable state, never actions", () =>
     await expect(
       applyOperatorReply(deps, { intentId: "intent-1", from: "c".repeat(64), text: "refunded" }),
     ).rejects.toBeInstanceOf(FiatIntentMismatchError);
+  });
+});
+
+describe("7. the escalation DM itself (ADR-0012 transport)", () => {
+  test("a terminal fiat failure produces a kind-1059 DM the operator can decrypt, carrying every required field", async () => {
+    const opSk = new Uint8Array(32).fill(7);
+    const opPk = getPublicKey(opSk);
+    const published: Array<ReturnType<typeof finalizeEvent>> = [];
+    const escalator = new NostrDmEscalator({
+      secretKey: new Uint8Array(32).fill(9),
+      publish: async (event) => {
+        published.push(event as ReturnType<typeof finalizeEvent>);
+      },
+    });
+    const { deps } = harness({ paid: true, behaviour: "throw", adapterError: "3DS prompt timed out" });
+    await expect(
+      payCheckoutGated({ ...deps, escalator, operatorNpub: opPk }, request()),
+    ).rejects.toBeInstanceOf(FiatTerminalError);
+
+    expect(published.length).toBe(1);
+    const wrap = published[0];
+    expect(wrap.kind).toBe(1059);
+    expect(wrap.tags).toEqual([["p", opPk]]);
+    expect(verifyEvent(wrap)).toBe(true);
+
+    // The operator's own key decrypts it: the notice really reaches the operator
+    // identity, not a log line.
+    const convKey = nip44.v2.utils.getConversationKey(opSk, wrap.pubkey);
+    const inner = JSON.parse(nip44.v2.decrypt(wrap.content, convKey)) as {
+      kind: number;
+      pubkey: string;
+      content: string;
+    };
+    expect(inner.kind).toBe(14);
+    const payload = JSON.parse(inner.content) as Record<string, unknown>;
+    expect(payload.kind).toBe("fiat_failed_terminal");
+    expect(payload.intentId).toBe("intent-1");
+    expect(payload.orderHash).toBe(ORDER_HASH);
+    expect(payload.satsProof).toBe(SATS_PROOF);
+    expect(payload.rail).toBe("2fiat-card");
+    expect(payload.amountSats).toBe(2500);
+    expect(payload.fiatCap).toBe("24.90");
+    expect(String(payload.whatFailed)).toContain("3DS prompt timed out");
+    expect(String(payload.resolutionHint)).toContain("refunded");
   });
 });
 

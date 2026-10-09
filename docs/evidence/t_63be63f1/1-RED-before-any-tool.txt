@@ -1,0 +1,151 @@
+# RED: the card.pay_checkout tool did not exist — written before the implementation
+# command: bun test services/cvm-2fiat/src/fiat.test.ts (before wiring)
+bun test v1.4.2 (744846f84)
+
+services/cvm-2fiat/src/fiat.test.ts:
+120 | 
+121 | describe("1. the surface", () => {
+122 |   test("card.pay_checkout is advertised and accepts no card field", () => {
+123 |     const { tools } = harness();
+124 |     const tool = tools.find((t) => t.definition.name === "card.pay_checkout");
+125 |     expect(tool).toBeDefined();
+                       ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:125:18)
+(fail) 1. the surface > card.pay_checkout is advertised and accepts no card field [2.04ms]
+135 |     try {
+136 |       call("card.pay_checkout", ARGS, STRANGER);
+137 |     } catch (e) {
+138 |       err = e;
+139 |     }
+140 |     expect(err).toBeInstanceOf(CvmRefusalError);
+                      ^
+error: expect(received).toBeInstanceOf(expected)
+
+Expected constructor: [class CvmRefusalError extends Error]
+Received value:  99 |         : (opts.fiat ?? { store, escalator, maxCheckoutSats: 100_000 }),
+100 |   };
+101 |   const tools = buildTwoFiatTools(deps);
+102 |   const call = (name: string, args: Record<string, unknown>, caller = OPERATOR) => {
+103 |     const tool = tools.find((t) => t.definition.name === name);
+104 |     if (!tool) throw new Error(`missing tool ${name}`);
+                               ^
+error: missing tool card.pay_checkout
+      at call (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:104:26)
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:136:7)
+
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:140:17)
+(fail) 1. the surface > a non-owner caller is refused BEFORE the adapter or the gate is reached [0.74ms]
+149 |     try {
+150 |       await call("card.pay_checkout", ARGS);
+151 |     } catch (e) {
+152 |       err = e;
+153 |     }
+154 |     expect(err).toBeInstanceOf(PaymentRequiredError);
+                      ^
+error: expect(received).toBeInstanceOf(expected)
+
+Expected constructor: [class PaymentRequiredError extends Error]
+Received value:  99 |         : (opts.fiat ?? { store, escalator, maxCheckoutSats: 100_000 }),
+100 |   };
+101 |   const tools = buildTwoFiatTools(deps);
+102 |   const call = (name: string, args: Record<string, unknown>, caller = OPERATOR) => {
+103 |     const tool = tools.find((t) => t.definition.name === name);
+104 |     if (!tool) throw new Error(`missing tool ${name}`);
+                               ^
+error: missing tool card.pay_checkout
+      at call (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:104:26)
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:150:13)
+
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:154:17)
+(fail) 2. unpaid call: refused, adapter NOT entered > an unpaid call is refused and the adapter is never entered [0.33ms]
+ 99 |         : (opts.fiat ?? { store, escalator, maxCheckoutSats: 100_000 }),
+100 |   };
+101 |   const tools = buildTwoFiatTools(deps);
+102 |   const call = (name: string, args: Record<string, unknown>, caller = OPERATOR) => {
+103 |     const tool = tools.find((t) => t.definition.name === name);
+104 |     if (!tool) throw new Error(`missing tool ${name}`);
+                               ^
+error: missing tool card.pay_checkout
+      at call (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:104:26)
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:164:24)
+(fail) 3. settled call: adapter entered exactly once > a settled call completes and enters the adapter once [0.19ms]
+ 99 |         : (opts.fiat ?? { store, escalator, maxCheckoutSats: 100_000 }),
+100 |   };
+101 |   const tools = buildTwoFiatTools(deps);
+102 |   const call = (name: string, args: Record<string, unknown>, caller = OPERATOR) => {
+103 |     const tool = tools.find((t) => t.definition.name === name);
+104 |     if (!tool) throw new Error(`missing tool ${name}`);
+                               ^
+error: missing tool card.pay_checkout
+      at call (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:104:26)
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:174:7)
+(fail) 3. settled call: adapter entered exactly once > concurrent settled calls enter the adapter exactly once [0.19ms]
+ 99 |         : (opts.fiat ?? { store, escalator, maxCheckoutSats: 100_000 }),
+100 |   };
+101 |   const tools = buildTwoFiatTools(deps);
+102 |   const call = (name: string, args: Record<string, unknown>, caller = OPERATOR) => {
+103 |     const tool = tools.find((t) => t.definition.name === name);
+104 |     if (!tool) throw new Error(`missing tool ${name}`);
+                               ^
+error: missing tool card.pay_checkout
+      at call (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:104:26)
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:185:18)
+(fail) 4. settled then failed fiat leg > the failure is terminal, escalated once, and never retried into the adapter [0.61ms]
+202 |     try {
+203 |       await call("card.pay_checkout", ARGS);
+204 |     } catch (e) {
+205 |       err = e;
+206 |     }
+207 |     expect(err).toBeInstanceOf(CvmRefusalError);
+                      ^
+error: expect(received).toBeInstanceOf(expected)
+
+Expected constructor: [class CvmRefusalError extends Error]
+Received value:  99 |         : (opts.fiat ?? { store, escalator, maxCheckoutSats: 100_000 }),
+100 |   };
+101 |   const tools = buildTwoFiatTools(deps);
+102 |   const call = (name: string, args: Record<string, unknown>, caller = OPERATOR) => {
+103 |     const tool = tools.find((t) => t.definition.name === name);
+104 |     if (!tool) throw new Error(`missing tool ${name}`);
+                               ^
+error: missing tool card.pay_checkout
+      at call (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:104:26)
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:203:13)
+
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:207:17)
+(fail) 5. fail closed when unconfigured > no fiat path configured -> rail_unavailable, never a fabricated outcome [0.59ms]
+223 |     try {
+224 |       await tool.handler(ARGS, { caller: OPERATOR });
+225 |     } catch (e) {
+226 |       err = e;
+227 |     }
+228 |     expect(err).toBeInstanceOf(CvmRefusalError);
+                      ^
+error: expect(received).toBeInstanceOf(expected)
+
+Expected constructor: [class CvmRefusalError extends Error]
+Received value: 219 |       fiat: { store: new MemoryFiatIntentStore(), escalator: new RecordingEscalator() },
+220 |     });
+221 |     const tool = noGate.find((t) => t.definition.name === "card.pay_checkout")!;
+222 |     let err: unknown;
+223 |     try {
+224 |       await tool.handler(ARGS, { caller: OPERATOR });
+                  ^
+TypeError: undefined is not an object (evaluating 'tool.handler')
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:224:13)
+
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_63be63f1/kit/services/cvm-2fiat/src/fiat.test.ts:228:17)
+(fail) 5. fail closed when unconfigured > no gate configured -> rail_unavailable (the sats must be verifiable, or nothing happens) [0.78ms]
+
+ 0 pass
+ 8 fail
+ 5 expect() calls
+Ran 8 tests across 1 file. [121.00ms]

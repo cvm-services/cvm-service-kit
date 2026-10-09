@@ -1,0 +1,38 @@
+--- gate order record (the sats half) ---
+{
+  "orderId": "intent-evidence-1",
+  "status": "settled",
+  "paymentHash": "paymenthash:7d3a9c1f1",
+  "invoice": "cashuBsettledinvoicefortestonly",
+  "amountSats": 2500
+}
+--- durable fiat intent (written before the adapter call) ---
+{
+  "intentId": "intent-evidence-1",
+  "tool": "card.pay_checkout",
+  "caller": "npub1customer000000000000000000000000000000000000000000000000000",
+  "orderHash": "sha256:5f2b8c0d1e4a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+  "rail": "2fiat-card",
+  "satsAmount": 2500,
+  "satsProof": "cashuBsettledinvoicefortestonly",
+  "fiatCap": "24.90",
+  "checkoutUrl": "https://merchant.example/checkout/abc123",
+  "status": "fiat_human_required",
+  "fiatAttempts": 1,
+  "adapterResult": {
+    "status": "human_required",
+    "order_id": "venue-order-1",
+    "at": 1791588109727
+  },
+  "createdAt": 1791588109725,
+  "updatedAt": 1791588109727
+}
+--- what actually ran, in order ---
+adapter.pay_checkout(https://merchant.example/checkout/abc123, 24.90)
+--- outcome returned to the caller ---
+{
+  "status": "human_required",
+  "order_id": "venue-order-1",
+  "intent_id": "intent-evidence-1",
+  "human_step": "3DS/SCA (and the 2fiat OTP) at the venue's hosted checkout. 2fiat is an issuer portal with no authorize endpoint, so the last step of every fiat payment is completed by the operator in a browser. No unattended fiat payment exists in this system."
+}
