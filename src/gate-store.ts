@@ -41,6 +41,24 @@ export class SqliteGateStore implements GateOrderStore {
     };
   }
 
+  /**
+   * Compare-and-set on the order status. A single conditional UPDATE is atomic
+   * in SQLite, so exactly one concurrent caller can move awaiting_payment ->
+   * settlement_reserved and thus exactly one may run the downstream action.
+   */
+  claim(orderId: string, from: GateOrder["status"], to: GateOrder["status"]): boolean {
+    const res = this.db.run(
+      `UPDATE gate_orders SET status = ?, updated_at = ? WHERE order_id = ? AND status = ?`,
+      [to, Date.now(), orderId, from],
+    );
+    return Number(res.changes ?? 0) === 1;
+  }
+
+  /** Release the SQLite handle, so a test runner can exit. */
+  close(): void {
+    this.db.close();
+  }
+
   put(order: GateOrder): void {
     this.db.run(
       `INSERT INTO gate_orders (order_id, tool, caller, amount_sats, invoice_json,

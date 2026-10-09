@@ -50,6 +50,28 @@ export class PaymentRequiredError extends Error {
   }
 }
 
+/** The payment settled, but another caller already holds the settlement claim. */
+export class SettlementInProgressError extends Error {
+  readonly code = -32003;
+  constructor(readonly orderId: string) {
+    super("settlement_in_progress");
+    this.name = "SettlementInProgressError";
+  }
+}
+
+/**
+ * Terminal settlement failure. The sats were taken and the downstream action
+ * failed (or its outcome is unknown). Retrying would spend the same payment
+ * twice, so a retry re-throws this instead of re-running the action.
+ */
+export class SettlementFailedError extends Error {
+  readonly code = -32004;
+  constructor(readonly orderId: string, readonly detail: string) {
+    super(`settlement_failed: ${detail}`);
+    this.name = "SettlementFailedError";
+  }
+}
+
 export function parseCapTags(tags: string[][]): Cap[] {
   const caps: Cap[] = [];
   for (const t of tags) {
@@ -60,7 +82,16 @@ export function parseCapTags(tags: string[][]): Cap[] {
   return caps;
 }
 
-export type GateOrderStatus = "awaiting_payment" | "paid" | "settled" | "refused";
+export type GateOrderStatus =
+  | "awaiting_payment"
+  /** Reserved: a caller holds the exclusive right to run the downstream action. */
+  | "settlement_reserved"
+  /** Terminal: the action failed after payment. Never retryable. */
+  | "settlement_failed"
+  /** Legacy (pre-2026-10-09): set BEFORE the action ran, so the outcome is unverifiable. */
+  | "paid"
+  | "settled"
+  | "refused";
 
 export interface GateOrder {
   orderId: string;
@@ -71,6 +102,8 @@ export interface GateOrder {
   status: GateOrderStatus;
   /** Cached tool result, so a replayed payment_accepted never runs twice. */
   result?: unknown;
+  /** Why a settlement failed. Recorded so a retry can be refused without re-running. */
+  failure?: { message: string; at: number };
   createdAt: number;
   updatedAt: number;
 }
@@ -78,12 +111,25 @@ export interface GateOrder {
 export interface GateOrderStore {
   get(orderId: string): GateOrder | undefined;
   put(order: GateOrder): void;
+  /**
+   * Atomically move `orderId` from `from` to `to`, returning true only for the
+   * caller that performed the transition. Exactly one concurrent caller can win,
+   * which is what stops two fiat attempts against a single sats payment.
+   */
+  claim(orderId: string, from: GateOrderStatus, to: GateOrderStatus): boolean;
 }
 
 export class MemoryOrderStore implements GateOrderStore {
   private readonly m = new Map<string, GateOrder>();
   get(id: string) { return this.m.get(id); }
   put(o: GateOrder) { this.m.set(o.orderId, o); }
+  // Synchronous and without an await: the check-and-set cannot interleave.
+  claim(id: string, from: GateOrderStatus, to: GateOrderStatus): boolean {
+    const cur = this.m.get(id);
+    if (!cur || cur.status !== from) return false;
+    this.m.set(id, { ...cur, status: to, updatedAt: Date.now() });
+    return true;
+  }
 }
 
 /**
@@ -133,6 +179,23 @@ export class ExplicitGate {
       return order.result as T;
     }
 
+    // A terminal failure stays terminal. The sats were taken and the downstream
+    // action failed; re-running it would spend the same payment twice.
+    if (order.status === "settlement_failed") {
+      throw new SettlementFailedError(order.orderId, order.failure?.message ?? "unknown");
+    }
+
+    // Rows written by the pre-fix code ("paid" was persisted BEFORE the action
+    // ran) have an unverifiable outcome. Never re-run them; escalate instead.
+    if (order.status === "paid") {
+      throw new SettlementFailedError(order.orderId, "legacy paid row: settlement outcome unknown");
+    }
+
+    // Another caller already holds the settlement claim for this payment.
+    if (order.status === "settlement_reserved") {
+      throw new SettlementInProgressError(order.orderId);
+    }
+
     if (order.status === "awaiting_payment") {
       const paid = await this.processor.verify(order.invoice, args.proof);
       if (!paid) {
@@ -144,16 +207,28 @@ export class ExplicitGate {
           pmi: order.invoice.pmi,
         });
       }
-      order.status = "paid";
-      order.updatedAt = Date.now();
-      this.store.put(order);
+      // Claim the right to settle exactly once. The loser must NOT run the action:
+      // that is how one sats payment became two fiat attempts before this fix.
+      const won = this.store.claim(order.orderId, "awaiting_payment", "settlement_reserved");
+      if (!won) throw new SettlementInProgressError(order.orderId);
     }
 
-    const result = await args.run();
-    order.status = "settled";
-    order.result = result;
-    order.updatedAt = Date.now();
-    this.store.put(order);
-    return result;
+    try {
+      const result = await args.run();
+      const done = this.store.get(order.orderId) ?? order;
+      done.status = "settled";
+      done.result = result;
+      done.updatedAt = Date.now();
+      this.store.put(done);
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const failed = this.store.get(order.orderId) ?? order;
+      failed.status = "settlement_failed";
+      failed.failure = { message, at: Date.now() };
+      failed.updatedAt = Date.now();
+      this.store.put(failed);
+      throw err;
+    }
   }
 }
