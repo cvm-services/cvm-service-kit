@@ -130,6 +130,24 @@ export interface GateOrderStore {
   get(orderId: string): GateOrder | undefined;
   put(order: GateOrder): void;
   /**
+   * Insert `order` only if no row exists for its id, and return the row that is
+   * there afterwards - which is the other caller's row when two of them raced to
+   * create the same order.
+   *
+   * WHY THIS IS NOT `put`: `put` is an unconditional upsert, so two callers that
+   * both read "no such order" before either wrote it both take the create path,
+   * and the second write overwrites a row its peer has already carried to a
+   * TERMINAL state. That resurrects a settled order as `awaiting_payment`, the
+   * loser then owns a fresh `awaiting_payment -> settlement_reserved` transition,
+   * and the paid action runs a SECOND time on one payment - measured across two
+   * service processes over one gate.sqlite (two SMS sends, one payment).
+   *
+   * So creation must be insert-if-absent (an atomic `ON CONFLICT DO NOTHING` in
+   * SQLite) and the gate must continue from the RETURNED row, never from the one
+   * it tried to write.
+   */
+  create(order: GateOrder): GateOrder;
+  /**
    * Atomically move `orderId` from `from` to `to`, returning true only for the
    * caller that performed the transition. Exactly one concurrent caller can win,
    * which is what stops two fiat attempts against a single sats payment.
@@ -141,6 +159,13 @@ export class MemoryOrderStore implements GateOrderStore {
   private readonly m = new Map<string, GateOrder>();
   get(id: string) { return this.m.get(id); }
   put(o: GateOrder) { this.m.set(o.orderId, o); }
+  /** Insert-if-absent: the first creator wins, every later caller gets its row. */
+  create(o: GateOrder): GateOrder {
+    const cur = this.m.get(o.orderId);
+    if (cur) return cur;
+    this.m.set(o.orderId, o);
+    return o;
+  }
   // Synchronous and without an await: the check-and-set cannot interleave.
   claim(id: string, from: GateOrderStatus, to: GateOrderStatus): boolean {
     const cur = this.m.get(id);
@@ -189,7 +214,11 @@ export class ExplicitGate {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      this.store.put(order);
+      // Insert-if-absent, and CONTINUE FROM THE SURVIVING ROW: a peer process can
+      // have created (and already settled) this order between our `get` above and
+      // this write. Continuing from the row we tried to write would resurrect a
+      // terminal order as `awaiting_payment` and run the action twice.
+      order = this.store.create(order);
     }
 
     if (order.status === "settled") {

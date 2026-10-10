@@ -1,0 +1,45 @@
+# Consumer audit (t_936c2a0f): is the CEP-8 gate wired to a DURABLE store in every consumer?
+# generated: grep -n 'new ExplicitGate|SqliteGateStore|MemoryOrderStore' services/*/src/server.ts
+
+== cvm-sms4sats ==
+  5:  SqliteGateStore,
+  42:  gateDb: string;
+  73:    gateDb: env.GATE_DB ?? "/var/lib/loom/cvm-sms4sats/gate.sqlite",
+  84: * `ExplicitGate` defaults to `MemoryOrderStore`, which is an in-process Map.
+  90: * cvm-2fiat) already passes a `SqliteGateStore`; this was the lone outlier.
+  92:export function buildGate(processor: PaymentProcessor, gateDb: string): ExplicitGate {
+  93:  return new ExplicitGate(processor, new SqliteGateStore(gateDb));
+  116:  const gate = buildGate(processor, cfg.gateDb);
+== cvm-lambda ==
+  8:  SqliteGateStore,
+  35:  gateDb: string;
+  57:    gateDb: env.GATE_DB ?? "/var/lib/loom/cvm-lambda/gate.sqlite",
+  118:      ? new ExplicitGate(
+  120:          new SqliteGateStore(cfg.gateDb),
+== cvm-ppq ==
+  6:  SqliteGateStore,
+  21:      ? new ExplicitGate(
+  23:          new SqliteGateStore(env.GATE_DB ?? "/var/lib/loom/cvm-ppq/gate.sqlite"),
+== cvm-nanogpt ==
+  5:  SqliteGateStore,
+  16:      ? new ExplicitGate(
+  18:          new SqliteGateStore(env.GATE_DB ?? "/var/lib/loom/cvm-nanogpt/gate.sqlite"),
+== cvm-2fiat ==
+  23:  SqliteGateStore,
+  46:  gateDb: string;
+  61:  const gateDb = env.GATE_DB ?? "/var/lib/loom/cvm-2fiat/gate.sqlite";
+  70:    gateDb,
+  73:    escalationDir: env.ESCALATION_DIR ?? gateDb.replace(/\/[^/]+$/, ""),
+  95:      ? new ExplicitGate(
+  97:          new SqliteGateStore(cfg.gateDb),
+
+# VERDICT (5/5 DURABLE after this card):
+#   cvm-lambda    DURABLE  - SqliteGateStore(cfg.gateDb)            server.ts:120
+#   cvm-ppq       DURABLE  - SqliteGateStore(env.GATE_DB ?? ...)    server.ts:23
+#   cvm-nanogpt   DURABLE  - SqliteGateStore(env.GATE_DB ?? ...)    server.ts:18
+#   cvm-2fiat     DURABLE  - SqliteGateStore(cfg.gateDb)            server.ts:97
+#   cvm-sms4sats  DURABLE  - SqliteGateStore(gateDb)                server.ts:93
+#                          was the LONE outlier (new ExplicitGate(processor), no store);
+#                          fixed by 64daf9e on fix/gate-consumer-audit, proven here.
+# Every consumer also gets an explicit gate DB path (GATE_DB env, defaulting under
+# /var/lib/loom/<service>/gate.sqlite), so the state survives restart in all five.

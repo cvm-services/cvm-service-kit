@@ -1,0 +1,19 @@
+bun test v1.4.2 (744846f84)
+
+services/cvm-sms4sats/src/gate-durability.test.ts:
+(pass) cvm-sms4sats gate store wiring > CONTROL: an in-memory gate store really does lose settlement across a restart [20.02ms]
+(pass) cvm-sms4sats gate store wiring > buildGate gives the gate a durable store: a replay after restart never re-runs [1270.74ms]
+(pass) cvm-sms4sats gate store wiring > the gate database defaults into the service state dir and honours GATE_DB [1.73ms]
+
+services/cvm-sms4sats/src/gate-process.test.ts:
+(pass) cvm-sms4sats gate: cross-process settlement > CONTROL: two service PROCESSES on the pre-fix no-store wiring both send (one payment, two SMS) [3072.62ms]
+(pass) cvm-sms4sats gate: cross-process settlement > one payment, one SMS send across two INDEPENDENT service processes (durable wiring) [2560.22ms]
+(pass) cvm-sms4sats gate: cross-process settlement > an order another PROCESS already claimed is refused; an already-settled one replays - neither sends [3538.00ms]
+(pass) cvm-sms4sats gate: cross-process settlement > restart durability through the service wiring: settled state and a terminal failure's reason survive a FRESH handle [1199.65ms]
+
+ 7 pass
+ 0 fail
+ 36 expect() calls
+Ran 7 tests across 2 files. [14.59s]
+
+BUN-TEST VERDICT: PASS rc=0 Ran 7 tests across 2 files. [14.59s] [15s]
