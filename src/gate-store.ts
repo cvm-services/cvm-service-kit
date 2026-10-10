@@ -107,7 +107,17 @@ export class SqliteGateStore implements GateOrderStore {
          failure_json=excluded.failure_json,
          -- COALESCE: a write that omits the digest must never clear the binding
          -- a claim recorded (only a fresh claim sets one).
-         proof_hash=COALESCE(excluded.proof_hash, gate_orders.proof_hash),
+         --
+         -- EXCEPT when the write moves a TERMINAL row back to awaiting_payment:
+         -- that is a new order generation on a reused orderId, so the previous
+         -- generation's binding is dropped rather than inherited (inheriting it
+         -- would settle the new order bound to the previous payer's digest).
+         proof_hash=CASE
+           WHEN excluded.status = 'awaiting_payment'
+            AND gate_orders.status IN ('settled', 'settlement_failed', 'refused', 'paid')
+           THEN excluded.proof_hash
+           ELSE COALESCE(excluded.proof_hash, gate_orders.proof_hash)
+         END,
          updated_at=excluded.updated_at`,
       [
         order.orderId,

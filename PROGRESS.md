@@ -144,3 +144,29 @@ chutes direct, reviewed head f8cbe15). All 7 adjudicated; 4 produced code/test c
 - round-2 green: 23/23 in src/replay_binding.test.ts (75 expect); `bun run test` 244 pass / 1 skip /
   0 fail; `bun run typecheck` rc=0; `deno task check` rc=0; `deno task test` 24 passed/0 failed.
 - round-2 mutation: evidence/replay_proof_binding.mutation_round2.txt (M1/M2/M3/M4 all caught).
+
+## Round 3 (2026-10-10) — the re-review of round 2 returned REQUEST_CHANGES again, 3 findings
+
+Artifact: ~/reports/reviews/contextvm-services-t_5b30bdec-Kimi-K3-TEE-review-r2.md (reviewed 2829a37).
+Two of the three were real defects in round 2's work; all are fixed or conceded. REPORT §10/§11.
+
+- R2-1 (major): my round-2 F3 dismissal ("needs a processor defect") was WRONG and is withdrawn.
+  Two distinct valid proofs for one invoice is ordinary bearer behaviour (the suite's own
+  ProofProcessor cannot see the concurrent redemption). F3 is now recorded as an accepted residual
+  risk in REPORT §5, with the trace, a recovery note and two candidate durable fixes; the hazard is
+  also documented on `PaymentProcessor.verify` (JSDoc) so the next processor author cannot miss it.
+- R2-2 (minor, real): the settle-time backfill was an uncaught mutant - dead under the bundled
+  stores and indistinguishable under LossyStore, so deleting it left the suite green. Added
+  LegacyClaimStore (pre-binding 3-arg `claim`, full-object put/get) which asserts the order settles
+  BOUND. Mutation M7 (delete the backfill) -> 1 fail.
+- R2-3 (minor, real, conditional): the F1 merge inherited a stale digest across orderId reuse (a
+  write taking a terminal row back to awaiting_payment), so the new order would settle bound to the
+  previous payer's digest. Fixed in BOTH stores (`startsNewGeneration` + a sqlite CASE). New test
+  covers both stores end to end. Mutations M5/M6 -> 1 fail each.
+- nits: no duplicated error message (`super(reason)`); comment on the deliberate result-withholding
+  exception; recorded that F7's constant-time compare is NOT mutation-pinnable (do not over-read
+  the mutation count).
+- round-3 green: 25/25 src/replay_binding.test.ts (92 expect); `bun run test` 246 pass / 1 skip /
+  0 fail; `bun run typecheck` rc=0; `deno task check` rc=0; `deno task test` 24 passed/0 failed.
+- round-3 mutation: evidence/replay_proof_binding.mutation_round3.txt - M1..M7 all caught, source
+  restored byte-identical. This supersedes the round-2 transcript (M1-M4 same, M5-M7 new).

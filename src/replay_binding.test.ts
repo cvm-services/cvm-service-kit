@@ -655,3 +655,90 @@ describe("the refusal does not reveal how the order was settled (F6)", () => {
     expect([...reasons]).toEqual(["settlement_evidence_mismatch"]);
   });
 });
+
+/**
+ * A store written BEFORE the binding existed: its `claim` has the old three-arg
+ * shape and cannot take a digest, but its `put`/`get` round-trip the whole
+ * `GateOrder`. This is the only store shape the settle-time backfill exists for
+ * (finding R2-2 of the round-2 review: without this test, deleting the backfill
+ * left the suite green).
+ */
+class LegacyClaimStore implements GateOrderStore {
+  private readonly m = new Map<string, GateOrder>();
+  get(id: string): GateOrder | undefined {
+    return this.m.get(id);
+  }
+  put(o: GateOrder): void {
+    this.m.set(o.orderId, o);
+  }
+  claim(id: string, from: GateOrder["status"], to: GateOrder["status"]): boolean {
+    const cur = this.m.get(id);
+    if (!cur || cur.status !== from) return false;
+    this.m.set(id, { ...cur, status: to, updatedAt: Date.now() });
+    return true;
+  }
+}
+
+describe("the settle-time backfill rescues a pre-binding store (R2-2)", () => {
+  test("a store whose claim ignores the digest still settles BOUND", async () => {
+    const store = new LegacyClaimStore();
+    const gate = new ExplicitGate(new ProofProcessor(["token-A"]), store);
+    // The claim could not record the digest, so this must settle rather than fail.
+    expect(await gate.gate(call("legacy-1", "token-A", async () => "paid-result"))).toBe(
+      "paid-result",
+    );
+    expect(store.get("legacy-1")!.proofHash).toBe(proofHash("token-A"));
+    // Bound for real: the payer's own proof collects the result, and nothing else does.
+    expect(await gate.gate(call("legacy-1", "token-A", async () => "paid-result"))).toBe(
+      "paid-result",
+    );
+    await expect(
+      gate.gate(call("legacy-1", "token-B", async () => "paid-result")),
+    ).rejects.toBeInstanceOf(SettlementEvidenceMismatchError);
+    await expect(gate.gate(call("legacy-1", undefined, async () => "paid-result"))).rejects.toBeInstanceOf(
+      SettlementEvidenceMismatchError,
+    );
+  });
+});
+
+describe("a reused orderId does not inherit the previous order's binding (R2-3)", () => {
+  test("a new generation settles with its own evidence, on both bundled stores", async () => {
+    const stores: [string, GateOrderStore][] = [
+      ["memory", new MemoryOrderStore()],
+      ["sqlite", new SqliteGateStore(join(mkdtempSync(join(tmpdir(), "reuse-")), "g.sqlite"))],
+    ];
+    for (const [name, store] of stores) {
+      const id = `reuse-${name}`;
+      // Generation 1: a proof-settled order.
+      const proofGate = new ExplicitGate(new ProofProcessor(["token-A"]), store);
+      expect(await proofGate.gate(call(id, "token-A", async () => "first-result"))).toBe("first-result");
+      expect(store.get(id)!.proofHash).toBe(proofHash("token-A"));
+
+      // The orderId is reused for a NEW order: a write that takes the terminal row
+      // back to awaiting_payment (a client that recycles its id, an operator reset).
+      const settled = store.get(id)!;
+      store.put({
+        ...settled,
+        status: "awaiting_payment",
+        result: undefined,
+        proofHash: undefined,
+        invoice: { ...settled.invoice, paymentHash: `ln-${id}`, request: `lnbc${id}` },
+        updatedAt: Date.now(),
+      });
+
+      // Generation 2 settles with NO client proof (an invoice-polling pmi).
+      const pollGate = new ExplicitGate(new PollingProcessor(), store);
+      expect(await pollGate.gate(call(id, undefined, async () => "second-result"))).toBe("second-result");
+      // Its binding is its own (none) - NOT the previous generation's digest.
+      expect(store.get(id)!.proofHash).toBeUndefined();
+      // So its own payer collects it...
+      expect(await pollGate.gate(call(id, undefined, async () => "second-result"))).toBe("second-result");
+      // ...and the previous generation's proof does not.
+      await expect(
+        proofGate.gate(call(id, "token-A", async () => "first-result")),
+      ).rejects.toBeInstanceOf(SettlementEvidenceMismatchError);
+
+      if (store instanceof SqliteGateStore) store.close();
+    }
+  });
+});

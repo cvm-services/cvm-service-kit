@@ -50,6 +50,29 @@ function digestEquals(a: string | undefined, b: string | undefined): boolean {
   return timingSafeEqual(ea, eb);
 }
 
+/** A status the gate will never move out of on its own. */
+const TERMINAL_STATUSES: readonly GateOrderStatus[] = [
+  "settled",
+  "settlement_failed",
+  "refused",
+  "paid", // legacy row: written before the action ran, refused on sight
+];
+
+/**
+ * Is this write a NEW order generation on a reused `orderId` rather than an
+ * update of the order already stored? `orderId` is client-supplied, so a caller
+ * can reuse one after its previous order settled; both bundled stores drop the
+ * previous generation's evidence digest in that case instead of inheriting it
+ * (see `MemoryOrderStore.put` / `SqliteGateStore.put`).
+ */
+function startsNewGeneration(prev: GateOrder | undefined, next: GateOrder): boolean {
+  return (
+    prev !== undefined &&
+    next.status === "awaiting_payment" &&
+    TERMINAL_STATUSES.includes(prev.status)
+  );
+}
+
 export interface Cap {
   /** e.g. "tool:run_code" */
   scope: string;
@@ -78,6 +101,19 @@ export interface PaymentProcessor {
    * Return true once the invoice is settled. `proof` is an optional
    * client-supplied payment proof (e.g. a Cashu token); Lightning processors
    * ignore it and poll, Cashu processors redeem it.
+   *
+   * EXACTLY-ONCE HAZARD for proof-consuming processors. `ExplicitGate` calls
+   * `verify()` to find out whether a call was paid, and only THEN serialises
+   * settlement on the store's atomic claim. Two concurrent first-calls for one
+   * order therefore both reach `verify()`, and a processor that accepts a second
+   * DISTINCT valid proof for an invoice it has already been paid for produces a
+   * second payer the gate cannot bind: the loser gets `SettlementInProgressError`
+   * and every later retry with its own (already redeemed) proof is refused by the
+   * evidence check. A processor that must not take two payments for one invoice
+   * has to reject the second proof itself - record the accepted payment against
+   * the invoice and refuse a redemption that would double-cover it - because the
+   * gate cannot serialise `verify()` against the claim. See REPORT §5 (residual
+   * gaps) and the F3 finding of this card's cross-family reviews.
    */
   verify(invoice: Invoice, proof?: string): Promise<boolean>;
 }
@@ -158,7 +194,7 @@ export class SettlementEvidenceMismatchError extends Error {
     readonly orderId: string,
     readonly reason: string,
   ) {
-    super(`settlement_evidence_mismatch: ${reason}`);
+    super(reason);
     this.name = "SettlementEvidenceMismatchError";
     this.data = { orderId, reason };
   }
@@ -263,9 +299,20 @@ export class MemoryOrderStore implements GateOrderStore {
    * say) would wipe the binding on the memory store and re-open the
    * orderId-only replay hole. Only a `claim()` - or a put that carries evidence
    * - sets a digest.
+   *
+   * Exception: a write that moves a TERMINAL row back to `awaiting_payment` is a
+   * NEW order generation on a reused `orderId`, not an update of the old one, so
+   * the old generation's binding is dropped instead of inherited. Inheriting it
+   * would settle the new order bound to the previous payer's digest: the new
+   * payer's own replay would be refused, and the previous payer's proof would
+   * collect the new order's result.
    */
   put(o: GateOrder) {
     const cur = this.m.get(o.orderId);
+    if (startsNewGeneration(cur, o)) {
+      this.m.set(o.orderId, { ...o, proofHash: o.proofHash });
+      return;
+    }
     if (o.proofHash === undefined && cur?.proofHash !== undefined) {
       this.m.set(o.orderId, { ...o, proofHash: cur.proofHash });
       return;
@@ -420,9 +467,13 @@ export class ExplicitGate {
         this.store.put(done);
       } catch {
         // The action RAN and succeeded; only recording it failed (a locked store).
-        // Never mask a completed action behind a storage error: the row is still
+        // Do not mask a completed action behind a storage error: the row is still
         // `settlement_reserved`, so the worst case is a replay that reports
         // "in progress" - never a second run of the action.
+        //
+        // (The F4 check below IS a deliberate exception: when the store ACCEPTED
+        // the write but dropped the digest, the settled row is replayable by
+        // orderId alone, so the result is withheld on purpose.)
         persisted = false;
       }
       // F4: the write was ACCEPTED but the digest did not land, so this settled

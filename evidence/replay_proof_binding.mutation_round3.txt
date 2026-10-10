@@ -1,0 +1,8 @@
+M1 MemoryOrderStore.put unconditional (F1): exit=1 :: 23 pass | 2 fail
+M2 F4 settle-path round-trip check removed: exit=1 :: 24 pass | 1 fail
+M3 presentedProof coerces non-strings (F5): exit=1 :: 24 pass | 1 fail
+M4 mismatch reason distinguishes settlement method again (F6): exit=1 :: 24 pass | 1 fail
+M5 MemoryOrderStore.put loses the new-generation exception (R2-3): exit=1 :: 24 pass | 1 fail
+M6 SqliteGateStore.put reverts the CASE to plain COALESCE (R2-3): exit=1 :: 24 pass | 1 fail
+M7 settle-time backfill deleted (R2-2): exit=1 :: 24 pass | 1 fail
+restored identical: True 

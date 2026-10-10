@@ -132,6 +132,21 @@ The no-proof idempotency row above is a deliberate boundary, not an oversight:
   needs a processor-supplied stable `evidenceKey` (the token's secret set, not its serialisation)
   via a `PaymentProcessor` interface change, because only the processor knows what identity it
   actually redeemed. Recorded as the follow-up rather than guessed at in the gate.
+- **A second payer for the same invoice is refused, permanently** (finding F3 of the round-1
+  review, conceded in round 3 — accepted residual risk). `ExplicitGate` calls `verify()` to learn
+  whether a call was paid and only then serialises settlement on the store's atomic claim, so two
+  concurrent first-calls both reach `verify()`. If a processor accepts a *second, distinct* valid
+  proof for an invoice it has already been paid for — ordinary bearer behaviour, not a processor
+  bug: `ProofProcessor` cannot see the concurrent redemption — the claim winner binds its own
+  digest and the loser is stuck: `SettlementInProgressError` now, `-32006` on every retry with its
+  own (already redeemed, hence unusable elsewhere) proof. Pre-change, the loser recovered the
+  cached result via the `orderId` replay that this fix removes. **Recovery:** the proof and the
+  order row are both on hand (`gate_orders.proof_hash` plus the caller's token), so an operator
+  can settle the second payment out of band. Candidate durable fixes (a first-class follow-up,
+  not this card): reject a proof for an invoice that is already paid inside the processor, or
+  bind an evidence **set** and record the losing caller's digest so any payer of that invoice can
+  collect the result. The hazard is documented on `PaymentProcessor.verify` so it cannot be
+  missed by the next processor author.
 - **`SqliteGateStore` still has no reaper** for a row stuck at `settlement_reserved`
   (finding F2 of the same review) — untouched by this card.
 - **The refusal is keyed on the digest, not on a verified re-redemption.** That is
@@ -271,4 +286,83 @@ Recorded rather than silently ignored.
 `evidence/replay_proof_binding.mutation_round2.txt` is the raw mutation transcript. Round 2 was
 committed and pushed to **both** remotes as `f59412f` (github + ngit/`origin`, read back with
 `git ls-remote`), on top of the round-1 commit `f8cbe15`.
+
+## 10. Round 3 — the re-review of round 2 (`2829a37`)
+
+Round 2's review (`~/reports/reviews/contextvm-services-t_5b30bdec-Kimi-K3-TEE-review-r2.md`)
+also returned **REQUEST_CHANGES**: 3 findings, 2 of them real defects in what round 2 shipped.
+All are fixed or conceded below. **One correction to §8: the F3 "not reachable" argument was
+wrong** and is withdrawn — see R2-1.
+
+**R2-1 (major) — the F3 dismissal is withdrawn and F3 is now recorded as an accepted residual
+risk.** The reviewer's refutation is correct and I accept it: `verify()` accepting two *distinct*
+valid tokens for one invoice is not a processor defect, it is ordinary bearer-instrument
+behaviour. The suite's own `ProofProcessor` ("valid and unspent → true") has no way to see the
+other concurrent redemption, so the trace is constructible with the repo's own shapes:
+
+> caller1 `gate(o-X, token-A)` and caller2 `gate(o-X, token-B)` arrive concurrently → both
+> `verify()` calls return true (two real payments) → caller1 wins the claim and binds
+> `H(token-A)` → caller2 gets `SettlementInProgressError` → every later retry with `token-B`
+> hits `assertReplayedEvidence` → `-32006`, permanently, and `token-B` is spent so it cannot
+> fund a fresh order either. Pre-change, caller2 recovered via the `orderId` replay that this
+> change removes.
+
+The round-2 rendezvous test only covers the *same-proof* race (which recovered even on base), so
+the reviewer is also right that it is a regression guard, not evidence for a dismissal. What
+round 2 should have said — and what §5 now records — is: F3 is an **accepted residual risk**, of
+the same family as F2, with a recovery note, not a bug that cannot happen. Two candidate durable
+fixes are recorded for the follow-up (a per-invoice "already paid" rejection inside the
+processor, or binding an evidence *set* and recording a losing caller's digest) — both are
+interface/state changes this card does not own. The hazard is now documented on the interface
+itself (`PaymentProcessor.verify` JSDoc), so a processor author cannot miss it.
+
+**R2-2 (minor, real) — the settle-time backfill was an uncaught mutant.** Verified, and it was
+worse than the reviewer could see: with the bundled stores the backfill never fires (the claim
+already wrote the digest), and with `LossyStore` the F4 round-trip check throws either way, so
+deleting the line left the suite green. Round 2's "every guard is mutation-pinned" claim was
+therefore overstated. Fixed by adding the one store shape the backfill exists for: a
+`LegacyClaimStore` whose `claim` has the pre-binding three-arg shape but whose `put`/`get`
+round-trip the whole `GateOrder`. That test asserts the order settles **bound**, the payer's own
+proof collects the result, and `token-B`/no-proof are refused. Mutation **M7** (delete the
+backfill) → **1 fail**.
+
+**R2-3 (minor, real, conditional) — the merge inherited a stale binding across orderId
+reuse.** The consequence the reviewer describes is real: a write that takes a *terminal* row
+back to `awaiting_payment` re-uses the orderId for a new order, and inheriting the old digest
+would settle the new order bound to the previous payer's digest — refusing the new payer and
+letting the old proof holder collect the new result. Fixed in **both** bundled stores: a write
+that moves a terminal row (`settled`/`settlement_failed`/`refused`/`paid`) back to
+`awaiting_payment` drops the digest instead of merging it (`startsNewGeneration` in
+`payment.ts`, a `CASE` in the sqlite `ON CONFLICT` upsert). New test covers both stores
+end-to-end: generation 2 settles with its own (absent) evidence, its own payer collects it, and
+generation 1's proof is refused. Mutations **M5** (memory branch removed) and **M6** (sqlite
+`CASE` reverted to plain `COALESCE`) → **1 fail each**.
+
+**Nits.** (a) `SettlementEvidenceMismatchError`'s message no longer duplicates the reason
+(`super(reason)`, matching `SettlementInProgressError`'s shape). (b) The comment above the F4
+check now says explicitly that withholding the result there is a *deliberate* exception to "do
+not mask a completed action". (c) Agreed and recorded: F7's `digestEquals` is behaviourally
+identical to `===`, so no mutation can pin it — the defence-in-depth item must not be counted as
+a mutation-pinned guard.
+
+The round-2 review's "attacks that did not land" are also worth recording, because they are
+independent confirmations: F2's disposition was judged adequate, the F4 bivariance argument was
+confirmed correct, the F1 merge was traced not to regress legitimate updates, F6 was confirmed
+to lose no recovery information, and the F1/F4/F5/F6 tests were each traced against `f8cbe15`
+and judged genuinely non-vacuous (including the F5 coercing-processor rewrite).
+
+## 11. Round 3 — verification (re-executed)
+
+| item | result |
+|---|---|
+| `bun test src/replay_binding.test.ts` | **25 pass / 0 fail** (92 `expect()` calls) |
+| `bun run test` | **246 pass / 1 skip / 0 fail** (247 tests / 36 files) |
+| `bun run typecheck` | `tsc --noEmit` exit **0** |
+| `deno task check` / `deno task test` | exit **0** / **24 passed, 0 failed** |
+| mutations M1–M7 | all caught (M1 → 2 fail; M2–M7 → 1 fail each) |
+| source restored byte-identical after mutation | yes |
+
+Raw transcript: `evidence/replay_proof_binding.mutation_round3.txt` (supersedes the round-2
+transcript; M1–M4 are the same mutants, M5–M7 are the three the round-2 review found uncovered).
+
 
