@@ -7,6 +7,7 @@
  * barrier for anything.
  */
 import { describe, expect, test } from "bun:test";
+import { nip44, verifyEvent, type Event } from "nostr-tools";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -356,4 +357,42 @@ describe("the real Nostr sink", () => {
     );
     expect(published.length).toBe(0);
   }, T);
+
+  /**
+   * The whole point of the escalation: the OPERATOR must be able to READ it.
+   * A gift wrap that encrypts to the recipient with one key and signs with
+   * another is undecryptable - and a test that only asserts "the content is not
+   * plaintext" passes happily on such a DM. This test decrypts.
+   */
+  test("the operator can DECRYPT the DM, and it is signed by the CVM (the CVM is the actor)", async () => {
+    const ownerSk = "b".repeat(64); // OPERATOR's key
+    const cvmSk = "a".repeat(64); // the service's own identity
+    const owner = operatorPubkeyOf(ownerSk);
+    expect(owner).toBe(OPERATOR);
+
+    const published: Event[] = [];
+    const sink = new NostrDmSink(cvmSk, async (e) => {
+      published.push(e as Event);
+    });
+    await sink.send({ to: owner, text: "intent i-esc-live needs a manual refund" });
+
+    const wrap = published[0]!;
+    expect(wrap.kind).toBe(1059);
+    expect(verifyEvent(wrap)).toBe(true);
+
+    // Exactly what the operator does with their own key and the wrapper pubkey.
+    const convKey = nip44.v2.utils.getConversationKey(
+      hexBytes(ownerSk),
+      wrap.pubkey,
+    );
+    const inner = JSON.parse(nip44.v2.decrypt(wrap.content, convKey)) as Event;
+    expect(inner.content).toContain("i-esc-live");
+    // the inner event is the CVM's: the operator can tell WHO escalated
+    expect(inner.pubkey).toBe(operatorPubkeyOf(cvmSk));
+    expect(verifyEvent(inner)).toBe(true);
+  }, T);
 });
+
+function hexBytes(hex: string): Uint8Array {
+  return new Uint8Array(hex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
+}

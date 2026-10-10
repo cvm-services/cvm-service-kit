@@ -374,12 +374,20 @@ export function cardMaterialPattern(text: string): string | undefined {
   return undefined;
 }
 
-/** Publish one already-signed Nostr event. `CvmServer.publishEvent` satisfies this. */
+/** Publish one already-signed event to the relays. `CvmServer.publishEvent` does. */
 export type PublishEvent = (event: Event) => Promise<void>;
 
 /**
  * The real DM sink: NIP-44 gift-wrapped kind 1059 to the recipient, signed with
  * the CVM's own key. The CVM is the actor (ADR-0012 PR #33).
+ *
+ * The inner kind-14 event is signed by the CVM key (that is what proves to the
+ * operator WHO escalated), while the 1059 wrapper is signed by a fresh random
+ * key AND encrypted with THAT key's conversation key - exactly as
+ * src/transport.ts does. Encrypting to the recipient with the CVM's own key
+ * while signing the wrapper with a different key produces a DM the recipient
+ * cannot decrypt at all: they would derive the conversation key from
+ * (their key, wrapper pubkey) and get garbage. (Mirrors transport.ts:239-255.)
  */
 export class NostrDmSink implements DmSink {
   private readonly sk: Uint8Array;
@@ -405,16 +413,18 @@ export class NostrDmSink implements DmSink {
       },
       this.sk,
     );
-    const convKey = nip44.v2.utils.getConversationKey(this.sk, dm.to);
-    const content = nip44.v2.encrypt(JSON.stringify(inner), convKey);
     const wrapSk = new Uint8Array(32);
     crypto.getRandomValues(wrapSk);
+    const wrapPk = getPublicKey(wrapSk);
+    const convKey = nip44.v2.utils.getConversationKey(wrapSk, dm.to);
+    const content = nip44.v2.encrypt(JSON.stringify(inner), convKey);
     const wrap = finalizeEvent(
       {
         kind: 1059,
         created_at: now,
         tags: [["p", dm.to]],
         content,
+        pubkey: wrapPk,
       } as any,
       wrapSk,
     );

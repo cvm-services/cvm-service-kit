@@ -161,17 +161,19 @@ export const BINDING_FIELDS = [
 /**
  * Refuse any re-use of an intent id whose binding differs from the stored one.
  * This is the check that stops "same order id, bigger fiat order" and
- * "same order id, different tool" from riding one payment.
+ * "same order id, different tool" from riding one payment. `intentId` is only
+ * carried into the error (it is the id, NOT the tool).
  */
 export function assertBindingMatches(
   stored: IntentBinding,
   requested: IntentBinding,
+  intentId = "?",
 ): void {
   for (const f of BINDING_FIELDS) {
     const a = stored[f];
     const b = requested[f];
     if (a !== b) {
-      throw new IntentConflictError(String(stored["tool"] ?? "?"), f, a, b);
+      throw new IntentConflictError(intentId, f, a, b);
     }
   }
 }

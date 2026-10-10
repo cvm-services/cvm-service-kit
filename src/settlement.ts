@@ -102,7 +102,7 @@ export class FiatSettlementMachine {
     }
     // The single check that makes a mismatched re-use impossible: wrong caller,
     // wrong tool, changed amount/order/quote/cap all land here.
-    assertBindingMatches(intent, binding);
+    assertBindingMatches(intent, binding, intent.intentId);
 
     switch (intent.status) {
       case "settled":
