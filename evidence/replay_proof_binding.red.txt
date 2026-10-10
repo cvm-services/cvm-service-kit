@@ -1,0 +1,48 @@
+# RED evidence — settled-replay proof binding (task t_5b30bdec)
+
+- repo: cvm-service-kit
+- base revision under test: `e2a7065` (github/main, = `e2a70650cb1825f298217c6ab8667d8d8b47e526`)
+- probe: `evidence/replay_proof_binding.red.ts` (asserts nothing; prints what the gate RETURNS)
+- command: `bun run evidence/replay_proof_binding.red.ts`
+- environment: bun 1.4.2
+- result: **finding F4 CONFIRMED on main** — every replay returns the cached result,
+  whatever proof is presented (a different proof, no proof, or a valid proof that paid
+  a different order).
+
+## Pre-fix output (verbatim)
+
+```
+$ bun run evidence/replay_proof_binding.red.ts
+scenario 1: order o-1 settled with proof token-A
+  first call (token-A): RETURNED "paid-result"
+  replay with a DIFFERENT proof (token-B)
+    RETURNED  "paid-result"
+  replay with NO proof at all
+    RETURNED  "paid-result"
+  replay with a VALID proof that paid ANOTHER order (token-C)
+    RETURNED  "paid-result"
+scenario 2: order o-2 settled with proof token-A, then a valid-but-other-order token
+  replay of o-2 with token-C (valid, but paid o-3)
+    RETURNED  "paid-result"
+scenario 3: order o-4 settled by an invoice (no client proof presented)
+  first call (no proof): RETURNED "paid-result"
+  replay of a no-proof order WITH a proof attached
+    RETURNED  "paid-result"
+  replay of a no-proof order with no proof
+    RETURNED  "paid-result"
+
+proof hash of token-A: ee718602fc38, token-B: 17c2b2ba08f8, token-C: 3fca7dd7f642
+```
+
+The relevant line in the pre-fix source is the settled branch of
+`ExplicitGate.gate` (`src/payment.ts`):
+
+```ts
+if (order.status === "settled") {
+  // Replay: return the cached result, never re-run the tool.
+  return order.result as T;
+}
+```
+
+`order.result` is keyed only by `orderId`; the client-supplied `proof` is never
+looked at, and no server-side fact about the payment is re-established.

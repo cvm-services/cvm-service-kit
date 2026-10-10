@@ -1,0 +1,113 @@
+# Mutation evidence — the replay binding check is load-bearing (t_5b30bdec)
+
+- tree: cvm-service-kit @ e2a7065 + the fix in this branch; bun 1.4.2
+- mutant: comment out the single call `this.assertReplayedEvidence(order, args.proof);` in the settled branch of ExplicitGate.gate.
+- command: `bun test src/replay_binding.test.ts`
+
+```
+bun test v1.4.2 (744846f84)
+
+src/replay_binding.test.ts:
+101 |       return "paid-result";
+102 |     };
+103 |     expect(await gate.gate(call("o-1", "token-A", run))).toBe("paid-result");
+104 |     expect(runs).toBe(1);
+105 | 
+106 |     await expect(gate.gate(call("o-1", "token-B", run))).rejects.toBeInstanceOf(
+                                                                       ^
+error: expect(received).rejects.toBeInstanceOf(expected)
+
+Expected promise that rejects
+Received promise that resolved: Promise { <resolved> }
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_5b30bdec/src/replay_binding.test.ts:106:66)
+(fail) settled replay must present the proof that paid the order > A: a DIFFERENT proof is refused [48.83ms]
+117 |       runs++;
+118 |       return "paid-result";
+119 |     };
+120 |     await gate.gate(call("o-1", "token-A", run));
+121 | 
+122 |     await expect(gate.gate(call("o-1", undefined, run))).rejects.toBeInstanceOf(
+                                                                       ^
+error: expect(received).rejects.toBeInstanceOf(expected)
+
+Expected promise that rejects
+Received promise that resolved: Promise { <resolved> }
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_5b30bdec/src/replay_binding.test.ts:122:66)
+(fail) settled replay must present the proof that paid the order > B: NO proof at all is refused (the proof is what identifies the payer) [0.54ms]
+141 |     // token-C is a real, unspent token - it just paid a different order.
+142 |     expect(await gate.gate(call("o-3", "token-C", async () => "other-order-result"))).toBe(
+143 |       "other-order-result",
+144 |     );
+145 | 
+146 |     await expect(gate.gate(call("o-2", "token-C", run))).rejects.toBeInstanceOf(
+                                                                       ^
+error: expect(received).rejects.toBeInstanceOf(expected)
+
+Expected promise that rejects
+Received promise that resolved: Promise { <resolved> }
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_5b30bdec/src/replay_binding.test.ts:146:66)
+(fail) settled replay must present the proof that paid the order > C: a VALID proof that paid a DIFFERENT order cannot collect this order's result [0.47ms]
+(pass) settled replay must present the proof that paid the order > C2: the same token cannot fund a second order on the unpaid path [9.91ms]
+(pass) settled replay must present the proof that paid the order > D: the SAME proof still replays the cached result (control - not a refuse-everything gate) [0.37ms]
+181 |     const gate = new ExplicitGate(new ProofProcessor(["token-A"]));
+182 |     await gate.gate(call("o-7", "token-A", async () => "paid-result"));
+183 |     const err = (await gate
+184 |       .gate(call("o-7", "token-B", async () => "paid-result"))
+185 |       .catch((e) => e)) as SettlementEvidenceMismatchError;
+186 |     expect(err).toBeInstanceOf(SettlementEvidenceMismatchError);
+                      ^
+error: expect(received).toBeInstanceOf(expected)
+
+Expected constructor: [class SettlementEvidenceMismatchError extends Error]
+Received value: "paid-result"
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_5b30bdec/src/replay_binding.test.ts:186:17)
+(fail) settled replay must present the proof that paid the order > the refusal does not hand the caller an invoice to pay again [48.57ms]
+(pass) orders settled without a client proof (invoice-polling pmi) > E: a no-proof replay keeps its cached result (documented idempotency) [0.69ms]
+210 |     const run = async () => {
+211 |       runs++;
+212 |       return "paid-result";
+213 |     };
+214 |     await gate.gate(call("o-9", undefined, run));
+215 |     await expect(gate.gate(call("o-9", "token-A", run))).rejects.toBeInstanceOf(
+                                                                       ^
+error: expect(received).rejects.toBeInstanceOf(expected)
+
+Expected promise that rejects
+Received promise that resolved: Promise { <resolved> }
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_5b30bdec/src/replay_binding.test.ts:215:66)
+(fail) orders settled without a client proof (invoice-polling pmi) > E2: a proof attached to an order it did not pay is refused [18.87ms]
+(pass) orders settled without a client proof (invoice-polling pmi) > a legacy settled row with no recorded evidence keeps the pre-fix contract [0.33ms]
+(pass) the binding is durable and is a digest, not the token > F: the store keeps the proof DIGEST, never the bearer token [4534.80ms]
+282 |     const store2 = new SqliteGateStore(path);
+283 |     const gate2 = new ExplicitGate(new ProofProcessor(["token-A", "token-B"]), store2);
+284 |     expect(await gate2.gate(call("r-1", "token-A", async () => "paid-AGAIN"))).toBe("paid-result");
+285 |     await expect(
+286 |       gate2.gate(call("r-1", "token-B", async () => "paid-AGAIN")),
+287 |     ).rejects.toBeInstanceOf(SettlementEvidenceMismatchError);
+                    ^
+error: expect(received).rejects.toBeInstanceOf(expected)
+
+Expected promise that rejects
+Received promise that resolved: Promise { <resolved> }
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_5b30bdec/src/replay_binding.test.ts:287:15)
+(fail) the binding is durable and is a digest, not the token > F2: the binding survives a restart, and a different proof is still refused [12480.62ms]
+(pass) the binding is durable and is a digest, not the token > F3: the claim records the binding atomically (a claimed row always has it) [11819.49ms]
+(pass) the binding is durable and is a digest, not the token > F4: the in-memory store honours the same contract [0.41ms]
+(pass) the unpaid path is unchanged > G: an unpaid order still refuses with payment_required and never runs [0.37ms]
+
+ 8 pass
+ 6 fail
+ 37 expect() calls
+Ran 14 tests across 1 file. [29.72s]
+```
+
+6 of the 14 tests fail without the check (the 8 that still pass are the controls:
+same-proof replay, invoice-settled no-proof replay, the legacy row, the store-level
+binding tests F3/F4 and the unchanged unpaid path G). Restored afterwards:
+`git diff --stat src/payment.ts` = 108 insertions / 5 deletions, i.e. the fix.

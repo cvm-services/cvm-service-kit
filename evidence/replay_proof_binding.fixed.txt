@@ -1,0 +1,29 @@
+# Post-fix output of the same probe (t_5b30bdec)
+
+- tree: this branch (fix applied), bun 1.4.2
+- command: `bun run evidence/replay_proof_binding.red.ts`
+- same script as `replay_proof_binding.red.txt`, which shows all replays RETURNING
+  the cached result on e2a7065.
+
+```
+$ bun run evidence/replay_proof_binding.red.ts
+scenario 1: order o-1 settled with proof token-A
+  first call (token-A): RETURNED "paid-result"
+  replay with a DIFFERENT proof (token-B)
+    REFUSED   SettlementEvidenceMismatchError: settlement_evidence_mismatch: the presented proof is not the proof that settled this order
+  replay with NO proof at all
+    REFUSED   SettlementEvidenceMismatchError: settlement_evidence_mismatch: replay presented no proof; the proof that settled this order is required
+  replay with a VALID proof that paid ANOTHER order (token-C)
+    REFUSED   SettlementEvidenceMismatchError: settlement_evidence_mismatch: the presented proof is not the proof that settled this order
+scenario 2: order o-2 settled with proof token-A, then a valid-but-other-order token
+  replay of o-2 with token-C (valid, but paid o-3)
+    REFUSED   SettlementEvidenceMismatchError: settlement_evidence_mismatch: the presented proof is not the proof that settled this order
+scenario 3: order o-4 settled by an invoice (no client proof presented)
+  first call (no proof): RETURNED "paid-result"
+  replay of a no-proof order WITH a proof attached
+    REFUSED   SettlementEvidenceMismatchError: settlement_evidence_mismatch: order was settled without a client proof; a proof cannot be bound to it on replay
+  replay of a no-proof order with no proof
+    RETURNED  "paid-result"
+
+proof hash of token-A: ee718602fc38, token-B: 17c2b2ba08f8, token-C: 3fca7dd7f642
+```

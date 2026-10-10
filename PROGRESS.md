@@ -86,3 +86,108 @@ verification, and the ADR-0012 escalation state machine.
 - Suite: 216 pass / 1 skip / 0 fail (217 tests / 35 files). `tsc --noEmit` exit 0.
 - Evidence: `src/evidence/output/{red_before,run1,run2,run3,dm_delivery,mutation,suite,typecheck,armed}.txt`.
 - Everything committed and pushed. No unpushed commits.
+
+## t_5b30bdec — settled-replay must re-bind the presented proof to the order (2026-10-10)
+- finding (cross-family review of t_e19ad2e9, F4): `ExplicitGate.gate` returned the cached
+  result for `status === "settled"` keyed on `orderId` alone, never looking at `args.proof` |
+  status: CONFIRMED on github/main e2a7065 (probe: different proof / no proof / valid-but-other-order
+  proof all RETURN the cached result) | files: src/payment.ts
+- fix: the digest of the proof that settled the order is recorded in the SAME atomic claim
+  (`GateOrder.proofHash`, mirroring `PaymentIntent.proofHash` + the intent store's sha256 rule), and a
+  replay must present matching evidence before the cached result is returned; otherwise
+  `SettlementEvidenceMismatchError` (-32006, no invoice in `data`, so a client is not invited to pay a
+  settled order twice) | files: src/payment.ts, src/gate-store.ts (proof_hash column + ALTER migration,
+  COALESCE so a later write cannot erase the binding)
+- scope decision: an order settled WITHOUT a client proof (invoice-polling pmi, or a legacy row) keeps
+  the documented no-proof idempotency contract — there is no client-held evidence to bind — but a
+  replay that attaches a proof to it is refused. Rationale + residual (orderId possession is still the
+  only handle for a poll-verified pmi) in REPORT-t_5b30bdec.md §4/§5.
+- red-before: e2a7065, probe returns the cached result on every replay (evidence/replay_proof_binding.red.txt)
+- mutation: removing the single `assertReplayedEvidence` call -> 8 pass / 6 fail
+  (evidence/replay_proof_binding.mutation.txt)
+- green: 14/14 new tests (src/replay_binding.test.ts); `bun run test` 235 pass / 1 skip / 0 fail
+  (36 files, was 216/1/0 on e2a7065); `bun run typecheck` rc=0 (evidence/replay_proof_binding.suite.txt)
+- not fixed here (reported): out-of-repo consumers of `ExplicitGate` (cvm-ppq, cvm-nanogpt) must be
+  audited for replays that present different payment evidence; `SqliteGateStore` still has no reaper
+  for a row stuck at `settlement_reserved` (finding F2 of the same review).
+
+## Round 2 (2026-10-10) — cross-family review of the fix returned REQUEST_CHANGES, 7 findings
+
+Artifact: ~/reports/reviews/contextvm-services-t_5b30bdec-Kimi-K3-TEE-review.md (moonshotai/Kimi-K3-TEE,
+chutes direct, reviewed head f8cbe15). All 7 adjudicated; 4 produced code/test changes:
+
+- F1 (major, real): `MemoryOrderStore.put` was an unconditional set, so a write built from a stale
+  pre-claim object erased the binding on the memory store while sqlite COALESCEd it. Fixed: `put` now
+  merges a recorded digest. Mutation M1 (revert to unconditional set) -> 2 fail.
+- F2 (major, accepted + now documented): a retry that no longer holds the exact same proof STRING
+  (pruned or re-serialised token, v3<->v4 encoding) is refused. Binding on the presented proof is the
+  point; the alternative is the hole. Recovery for the ordinary retry (same proof string) is pinned by
+  test; the re-serialised case is pinned as a characterisation test; the residual gap and the proper
+  fix (processor-supplied stable `evidenceKey`) are recorded in REPORT §6.
+- F3 (conditional major, resolved): confirmed in code that `verify()` (L371) runs BEFORE `claim()`
+  (L384), so the reviewer's premise held. The stranding branch needs two DISTINCT proofs accepted for
+  one invoice (a processor-level double-payment). The reachable same-proof race is pinned by test: the
+  loser gets SettlementInProgressError, exactly one action runs, and the loser's own proof then collects
+  the cached result.
+- F4 (minor, mitigated): `proofHash?` stays optional (a required param would not force implementors -
+  TS bivariance), so the mitigation is runtime: the settle-path round-trip check fails closed with
+  SettlementBindingNotPersistedError. Mutation M2 (drop the check) -> 1 fail.
+- F5 (minor, fixed): `presentedProof()` normalises once; a non-string is never evidence. Mutation M3
+  (coerce instead) -> 1 fail; the test uses a COERCING processor, because a processor that already
+  rejects unknown strings cannot distinguish the mutant.
+- F6 (nit, fixed): one uniform `settlement_evidence_mismatch` reason for every mismatch shape - the
+  per-case reasons were a settlement-method oracle. Mutation M4 (re-differentiate) -> 1 fail.
+- F7 (nit, fixed): digest compare is now constant-time (`digestEquals` via timingSafeEqual).
+- considered + rejected: the -32006 code collision with refusals.ts `rail_unavailable`. The kit's
+  convention is that the stable `reason` string discriminates (refusals.ts maps three reasons to
+  -32602); codes are coarse buckets and collisions are pre-existing and endemic.
+- round-2 green: 23/23 in src/replay_binding.test.ts (75 expect); `bun run test` 244 pass / 1 skip /
+  0 fail; `bun run typecheck` rc=0; `deno task check` rc=0; `deno task test` 24 passed/0 failed.
+- round-2 mutation: evidence/replay_proof_binding.mutation_round2.txt (M1/M2/M3/M4 all caught).
+
+## Round 3 (2026-10-10) — the re-review of round 2 returned REQUEST_CHANGES again, 3 findings
+
+Artifact: ~/reports/reviews/contextvm-services-t_5b30bdec-Kimi-K3-TEE-review-r2.md (reviewed 2829a37).
+Two of the three were real defects in round 2's work; all are fixed or conceded. REPORT §10/§11.
+
+- R2-1 (major): my round-2 F3 dismissal ("needs a processor defect") was WRONG and is withdrawn.
+  Two distinct valid proofs for one invoice is ordinary bearer behaviour (the suite's own
+  ProofProcessor cannot see the concurrent redemption). F3 is now recorded as an accepted residual
+  risk in REPORT §5, with the trace, a recovery note and two candidate durable fixes; the hazard is
+  also documented on `PaymentProcessor.verify` (JSDoc) so the next processor author cannot miss it.
+- R2-2 (minor, real): the settle-time backfill was an uncaught mutant - dead under the bundled
+  stores and indistinguishable under LossyStore, so deleting it left the suite green. Added
+  LegacyClaimStore (pre-binding 3-arg `claim`, full-object put/get) which asserts the order settles
+  BOUND. Mutation M7 (delete the backfill) -> 1 fail.
+- R2-3 (minor, real, conditional): the F1 merge inherited a stale digest across orderId reuse (a
+  write taking a terminal row back to awaiting_payment), so the new order would settle bound to the
+  previous payer's digest. Fixed in BOTH stores (`startsNewGeneration` + a sqlite CASE). New test
+  covers both stores end to end. Mutations M5/M6 -> 1 fail each.
+- nits: no duplicated error message (`super(reason)`); comment on the deliberate result-withholding
+  exception; recorded that F7's constant-time compare is NOT mutation-pinnable (do not over-read
+  the mutation count).
+- round-3 green: 25/25 src/replay_binding.test.ts (92 expect); `bun run test` 246 pass / 1 skip /
+  0 fail; `bun run typecheck` rc=0; `deno task check` rc=0; `deno task test` 24 passed/0 failed.
+- round-3 mutation: evidence/replay_proof_binding.mutation_round3.txt - M1..M7 all caught, source
+  restored byte-identical. This supersedes the round-2 transcript (M1-M4 same, M5-M7 new).
+
+## Round 4 (cross-family re-review of the R3-1 delta) - done
+- r3 review (chutes moonshotai/Kimi-K3-TEE, reviewed cd1225f): APPROVE + 1 non-blocking finding
+  R3-1 (only `settled` was pinned; deleting a single entry from either terminal-status list
+  survived the suite). Accepted and closed: c41b528 parameterises the reuse test over all four
+  statuses on both stores (settled/settlement_failed via the REAL gate path), docs both sites.
+- r4 review (same lane, head c41b528): APPROVE + F4-1 (minor) + F4-2 (nit).
+  F4-1 was RIGHT and about my own prose: the comment claimed the test loops over TERMINAL_STATUSES;
+  it looped over a local mirror, so an ADDED entry stayed unpinned. Fixed in the strong direction
+  in 0b9c4a7: TERMINAL_STATUSES is exported, the sqlite CASE IN-list is interpolated from it (the
+  two stores can no longer drift), the explicit mirror stays (pins deletions) plus a set-equality
+  assertion against the exported list (pins additions).
+  F4-2: the mutation transcript header named the committed HEAD while its baseline was the dirty
+  tree; regenerated so the header prints the commit AND the working-tree status.
+- round-4 green: 27/27 src/replay_binding.test.ts (145 expect); `bun run test` 248 pass / 1 skip /
+  0 fail (249 tests); `bun run typecheck` rc=0; `deno task check` rc=0; `deno check
+  src/payment.ts src/gate-store.ts` rc=0; `deno task test` 24 passed/0 failed.
+- round-4 mutation: evidence/replay_proof_binding.mutation_round4.txt - M8..M12 caught;
+  M13 (equality assertion deleted first, then settle_failed removed) also caught -> proves the
+  behavioural loop has teeth on its own; source restored byte-identical.
+- report: REPORT-t_5b30bdec.md sections 7 (all four rounds), 12, 13 updated.
