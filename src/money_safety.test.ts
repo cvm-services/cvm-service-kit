@@ -8,6 +8,7 @@
  * restart erased.
  */
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,9 +16,12 @@ import { fileURLToPath } from "node:url";
 import { SqliteGateStore } from "./gate-store.ts";
 import {
   ExplicitGate,
+  GateOrderStateError,
   MemoryOrderStore,
   PaymentRequiredError,
+  SettlementFailedError,
   type GateOrder,
+  type GateOrderStatus,
   type Invoice,
   type PaymentProcessor,
 } from "./payment.ts";
@@ -104,9 +108,55 @@ describe("ExplicitGate money safety", () => {
 
     await expect(gate.gate(req("o1", boom))).rejects.toThrow("venue refused");
     // The sats were taken and the venue action failed. A retry must NOT attempt
-    // a second fiat action against the same payment.
-    await expect(gate.gate(req("o1", boom))).rejects.toThrow();
+    // a second fiat action against the same payment, and it must say WHY it is
+    // refusing rather than "any throw will do": a bare `rejects.toThrow()` would
+    // also pass for an unrelated crash (e.g. the store throwing SQLITE_BUSY).
+    const second = await gate.gate(req("o1", boom)).catch((e) => e);
+    expect(second).toBeInstanceOf(SettlementFailedError);
+    expect((second as SettlementFailedError).code).toBe(-32004);
+    expect((second as SettlementFailedError).orderId).toBe("o1");
+    expect((second as Error).message).toContain("venue refused");
     expect(runs).toBe(1);
+  });
+
+  test("an unrecognised order status is refused, never run", async () => {
+    // A row written by a build that does not exist yet (a future status, or a
+    // status a rollback re-introduced). Enumerating the statuses we know and
+    // letting everything else fall through to `run()` is a fail-OPEN: an
+    // unverified order would execute the downstream action with no claim.
+    const processor = new FakeProcessor();
+    processor.paid = true;
+    const store = new MemoryOrderStore();
+    store.put({ ...awaitingOrder("w1"), status: "status_from_the_future" as GateOrderStatus });
+    const gate = new ExplicitGate(processor, store);
+    let runs = 0;
+    const run = async () => {
+      runs++;
+      return "placed";
+    };
+
+    const err = await gate.gate(req("w1", run)).catch((e) => e);
+    expect(err).toBeInstanceOf(GateOrderStateError);
+    expect((err as GateOrderStateError).code).toBe(-32005);
+    expect((err as GateOrderStateError).status).toBe("status_from_the_future");
+    expect(runs).toBe(0);
+  });
+
+  test("a legacy `paid` row is refused as an unverifiable state", async () => {
+    // `paid` was written BEFORE the action ran by the pre-2026-10-09 code, so the
+    // outcome (did the venue get called?) is unknowable. Fail closed: refuse, do
+    // not run, and do not report it as a settlement failure it may never have had.
+    const processor = new FakeProcessor();
+    processor.paid = true;
+    const store = new MemoryOrderStore();
+    store.put({ ...awaitingOrder("legacy1"), status: "paid" });
+    const gate = new ExplicitGate(processor, store);
+    let runs = 0;
+
+    const err = await gate.gate(req("legacy1", async () => (runs++, "placed"))).catch((e) => e);
+    expect(err).toBeInstanceOf(GateOrderStateError);
+    expect((err as GateOrderStateError).status).toBe("paid");
+    expect(runs).toBe(0);
   });
 
   test("concurrent calls run the tool exactly once", async () => {
@@ -227,8 +277,122 @@ describe("SqliteGateStore money safety", () => {
     expect(b.get("y")!.status).toBe("settlement_reserved");
 
     a.close();
-    a.close();
     b.close();
+  }, SLOW);
+
+  test("a failed run stays terminal ACROSS A RESTART, with its reason recorded", async () => {
+    // The mirror of the restart-replay test above, for the failure path. The card
+    // requires a failed settlement to be TERMINAL *and* to "return the recorded
+    // failure". A store that persists the status but drops `failure` on write
+    // leaves a restart reporting "unknown", i.e. the operator loses the reason the
+    // customer's payment did not turn into service - the only evidence there is.
+    const path = join(mkdtempSync(join(tmpdir(), "gate-fail-restart-")), "gate.sqlite");
+    const p1 = new FakeProcessor();
+    p1.paid = true;
+    const gate1 = new ExplicitGate(p1, new SqliteGateStore(path));
+    let runs = 0;
+    const boom = async () => {
+      runs++;
+      throw new Error("venue refused the card");
+    };
+    await expect(gate1.gate(req("fr1", boom))).rejects.toThrow("venue refused the card");
+
+    // Restart: new gate, new store, same file. Same proof, same order.
+    const p2 = new FakeProcessor();
+    p2.paid = true;
+    const store2 = new SqliteGateStore(path);
+    expect(store2.get("fr1")!.status).toBe("settlement_failed");
+
+    const err = await new ExplicitGate(p2, store2).gate(req("fr1", boom)).catch((e) => e);
+    expect(err).toBeInstanceOf(SettlementFailedError);
+    expect((err as SettlementFailedError).message).toContain("venue refused the card");
+    expect(runs).toBe(1);
+    store2.close();
+  }, SLOW);
+
+  test("lock contention busy-waits and then claims cleanly, never throwing raw SQLITE_BUSY", async () => {
+    // `claim` is called AFTER `verify` accepted a real payment, so a raw
+    // SQLITE_BUSY escaping from it turns a paid call into an opaque 500. Worse,
+    // the same throw from the terminal `put()` leaves the row at
+    // `settlement_reserved` forever - the customer paid and can never retry.
+    // PRAGMA busy_timeout turns lock contention into an ordinary lost CAS.
+    const { store, path } = mkStore();
+    store.put(awaitingOrder("busy"));
+
+    // A different PROCESS holds the write lock for 200 ms, exactly like another
+    // worker's in-flight claim on the same order file. It must be a real process:
+    // claim() is synchronous, so a same-process timer can never release the lock
+    // while SQLite busy-waits (see money_safety.lock_holder.ts).
+    const holder = Bun.spawn({
+      cmd: [
+        process.execPath,
+        fileURLToPath(new URL("./money_safety.lock_holder.ts", import.meta.url)),
+        path,
+        "400",
+      ],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const reader = holder.stdout.getReader();
+    // Do not race the claim against the lock: wait until the child really holds it.
+    const first = await reader.read();
+    reader.releaseLock();
+    expect(new TextDecoder().decode(first.value).trim()).toBe("holding");
+
+    // Without a busy timeout this THROWS SQLITE_BUSY instead of waiting (that is
+    // the failure mode this test exists for). With one, it waits for the holder to
+    // release and then wins the still-free transition: contention becomes a slow
+    // CAS, not an opaque 500 on a call whose payment was already verified.
+    const started = performance.now();
+    const won = store.claim("busy", "awaiting_payment", "settlement_reserved");
+    const waited = performance.now() - started;
+    expect(won).toBe(true);
+    // It must have actually waited for the other writer (the holder keeps the lock
+    // for 400 ms), not merely got lucky because the lock was already released.
+    expect(waited).toBeGreaterThan(150);
+    expect(store.get("busy")!.status).toBe("settlement_reserved");
+    expect(await holder.exited).toBe(0);
+    store.close();
+  }, SLOW);
+
+  test("an existing pre-fix database is migrated, not left column-less", () => {
+    // Deployed services already have a gate.sqlite on disk. `CREATE TABLE IF NOT
+    // EXISTS` does nothing to an existing file, so without an explicit migration
+    // every running deployment would keep the old schema and hit "no such column"
+    // (or silently drop the failure reason) on the first failed settlement.
+    const path = join(mkdtempSync(join(tmpdir(), "gate-migrate-")), "gate.sqlite");
+    const legacy = new Database(path);
+    legacy.run(`CREATE TABLE gate_orders (
+      order_id TEXT PRIMARY KEY,
+      tool TEXT NOT NULL,
+      caller TEXT NOT NULL,
+      amount_sats INTEGER NOT NULL,
+      invoice_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      result_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`);
+    // A row the live code may already hold: sats taken, outcome unknown.
+    legacy.run(
+      `INSERT INTO gate_orders VALUES ('m1','tool','npub1c',1,'{}','paid',NULL,1,1)`,
+    );
+    legacy.close();
+
+    const store = new SqliteGateStore(path);
+    // The legacy row survives the migration untouched - it is refused, not rewritten.
+    expect(store.get("m1")!.status).toBe("paid");
+    const order = store.get("m1")!;
+    order.status = "settlement_failed";
+    order.failure = { message: "venue refused", at: 7 };
+    store.put(order);
+    store.close();
+
+    // Restart over the migrated file: the reason is still there.
+    const again = new SqliteGateStore(path);
+    expect(again.get("m1")!.status).toBe("settlement_failed");
+    expect(again.get("m1")!.failure).toEqual({ message: "venue refused", at: 7 });
+    again.close();
   }, SLOW);
 
   test("a replayed proof does not re-run the tool after a restart", async () => {
@@ -267,47 +431,66 @@ describe("SqliteGateStore money safety", () => {
       // which is the double-spend scenario: two fiat attempts against one sats
       // payment.
       //
-      // What this test can and cannot see (measured, see REPORT.md): with all
-      // callers colliding on SQLite's write lock, exactly one takes the row and
-      // the rest fail closed, so it demonstrates the "never two winners"
-      // invariant. It cannot distinguish an implementation whose decision and
-      // write are not one statement, because the write lock serialises them; the
-      // truth-table and cross-connection tests above are what catch a claim that
-      // drops the `from` guard or answers from a snapshot.
+      // What this test can and cannot see (measured 2026-10-10, see REPORT.md and
+      // evidence/mutation_M*.txt): with all callers colliding on SQLite's write
+      // lock, exactly one takes the row and the rest fail closed, so it
+      // demonstrates the "never two winners" invariant.
+      //
+      // A single round is NOT enough to rely on. Against a mutant whose claim
+      // reads the row and only THEN writes it unguarded (the TOCTOU shape), one
+      // round caught it in 4 of 6 runs - the losing window is one synchronous
+      // statement pair, so it only trips when two processes genuinely interleave.
+      // ROUNDS independent rounds take that to ~1 - (1/3)^ROUNDS (~99% at 4) for
+      // about half a second each, which is what a double-spend invariant is worth.
+      // An implementation that answers from a comparison instead of a statement is
+      // still caught DETERMINISTICALLY by the truth-table and cross-connection
+      // tests above (measured: 2 failures).
       const CALLERS = 3;
-      const { store: seed, path } = mkStore();
-      seed.put(awaitingOrder("race"));
-      seed.close();
-
+      const ROUNDS = 4;
       const runner = fileURLToPath(new URL("./money_safety.cas_runner.ts", import.meta.url));
-      const startAt = Date.now() + 300;
-      const procs = Array.from({ length: CALLERS }, () =>
-        Bun.spawn({
-          cmd: [process.execPath, runner, path, "race", String(startAt)],
-          stdout: "pipe",
-        }),
-      );
+      const failures: string[] = [];
 
-      let outcomes: string[];
-      try {
-        outcomes = await Promise.all(
-          procs.map(async (p) => (await new Response(p.stdout).text()).trim()),
+      for (let round = 0; round < ROUNDS; round++) {
+        const { store: seed, path } = mkStore();
+        seed.put(awaitingOrder("race"));
+        seed.close();
+
+        const startAt = Date.now() + 300;
+        const procs = Array.from({ length: CALLERS }, () =>
+          Bun.spawn({
+            cmd: [process.execPath, runner, path, "race", String(startAt)],
+            stdout: "pipe",
+          }),
         );
-      } finally {
-        await Promise.all(procs.map((p) => p.exited));
+
+        let outcomes: string[];
+        try {
+          outcomes = await Promise.all(
+            procs.map(async (p) => (await new Response(p.stdout).text()).trim()),
+          );
+        } finally {
+          await Promise.all(procs.map((p) => p.exited));
+        }
+
+        const check = new SqliteGateStore(path);
+        const finalStatus = check.get("race")!.status;
+        check.close();
+
+        // Exactly one caller takes the transition per round. Two or more is the
+        // double spend this fix exists to prevent.
+        const winners = outcomes.filter((o) => o === "won").length;
+        // Nobody produced an unexpected outcome: every caller either took the row,
+        // lost the comparison, or failed closed on the lock.
+        const unexpected = outcomes.filter((o) => o !== "won" && o !== "lost" && o !== "locked");
+        if (winners !== 1 || unexpected.length > 0 || finalStatus !== "settlement_reserved") {
+          failures.push(
+            `round ${round}: winners=${winners} final=${finalStatus} outcomes=[${outcomes.join(",")}]`,
+          );
+        }
       }
 
-      // Exactly one caller takes the transition. Two or more is the double spend
-      // this fix exists to prevent.
-      expect(outcomes.filter((o) => o === "won").length).toBe(1);
-      // Nobody produced an unexpected outcome: every caller either took the row,
-      // lost the comparison, or failed closed on the lock.
-      expect(outcomes.filter((o) => o !== "won" && o !== "lost" && o !== "locked")).toEqual([]);
-
-      const check = new SqliteGateStore(path);
-      expect(check.get("race")!.status).toBe("settlement_reserved");
-      check.close();
+      expect(failures).toEqual([]);
     },
-    30_000,
+    60_000,
   );
 });

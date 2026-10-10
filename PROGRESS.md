@@ -1,4 +1,44 @@
-# t_89dcb160 — Fiat settlement state machine (durable intents, exactly-once settled_reserved, restart-safe replay + ADR-0012 escalation)
+# PROGRESS
+
+## t_e19ad2e9 — ExplicitGate money-safety gaps (2026-10-10)
+- finding: gate() enumerated statuses as separate ifs; `refused`/unknown fell through to run() with
+  no verify() and no claim() -> same double-spend class as the missing-CAS bug | status: FIXED
+  (exhaustive switch + default -> GateOrderStateError -32005) | files: src/payment.ts
+- finding: terminal settlement failure + reason were not durable; CREATE TABLE IF NOT EXISTS is a
+  no-op on a deployed file so the column would never appear | status: FIXED (`failure_json` +
+  ALTER TABLE migration, busy_timeout=5000) | files: src/gate-store.ts
+- finding: a failing terminal store write could mask a completed action | status: FIXED (both
+  terminal puts wrapped, fail closed) | files: src/payment.ts
+- finding: consumer audit — 4 services pass a SqliteGateStore; cvm-sms4sats:94 passes NO store, so
+  it keeps in-memory gate memory across restarts | status: REPORTED, not fixed (service-level, needs
+  own card) | files: services/cvm-sms4sats/src/server.ts
+- finding: deno.lock stale on b35b916 (`@cashu/cashu-ts@^2.1.0` vs package.json `^4.11.0`); any
+  deno task rewrites it | status: REPORTED, reverted to keep diff focused
+- red-before: github/main 7958fff -> 3 pass / 5 fail, incl. two `Received: 2` (action ran twice)
+  | evidence/red_main.txt
+- mutation: snapshot-cache claim -> 2 fail (caught); TOCTOU claim -> 4/6 with 1 round, 6/6 with 4
+  rounds (test strengthened) | evidence/mutation_M1_snapshot_cache.txt, mutation_M2_strengthened.txt
+- green: bun test src/money_safety.test.ts 13/13; bun run test 172 pass/1 skip/0 fail (31 files);
+  bun run typecheck rc=0; deno task check rc=0; deno task test 24/24 | evidence/suite_bun.txt,
+  suite_deno.txt
+- deno scope: `deno task check` only checks src/mod.ts, which does NOT re-export payment.ts or
+  gate-store.ts -> checked them explicitly (rc=0) WITH a negative control proving deno reports
+  errors there (TS2322) | evidence/deno_scope.txt
+- commit b4ecf58 + e8508b9; pushed github fix/gate-money-safety (PR #13, comment 6093496026) and ngit
+  (refs/heads/fix/gate-money-safety = e8508b9, read back via ls-remote). GitHub Actions CI green on
+  e8508b9 (run 38022113139, jobs bun+deno pass).
+- gate: tier=code, cleared tests_green/pushed_or_consolidated/consolidated/secrets_clean/
+  review_published. Still missing: ci_evidence (STRUCTURAL - gate reads ngit kind-9842 and this repo
+  emits none at any commit; it is GitHub-Actions-routed), no_live_drift (unrelated systemd/fleet
+  drift), pr_branch_naming (branch pre-dates the card as PR #13's head), cold_cross_family_review +
+  review_artifact (review lane's job -> card sent to review).
+- sent to review (no reviewer pinned: author is zai/tier/coding-worker, D-115 needs another family).
+- REPORT.md section "t_e19ad2e9 (2026-10-10)" at the top carries the full write-up.
+
+---
+
+
+## t_89dcb160 — Fiat settlement state machine (durable intents, exactly-once settled_reserved, restart-safe replay + ADR-0012 escalation)
 
 Branch: `worker-base/t_89dcb160` (stacked on `fix/gate-money-safety` = PR #13, the money-bug fix).
 Worktree: `/home/c03rad0r/worktrees/t_89dcb160` (node_modules symlinked to the reference repo).

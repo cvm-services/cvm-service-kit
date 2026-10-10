@@ -1,0 +1,19 @@
+== deno task check ==
+[0m[32mTask[0m [0m[36mcheck[0m deno check src/mod.ts
+[0m[32mCheck[0m src/mod.ts
+exit=0
+
+== deno task test ==
+recompute: absent is not none (unclassified -> null, no tier tag expected) ... [0m[32mok[0m [0m[38;5;245m(392µs)[0m
+recompute: an unknown field fails loud and is never 'none' ... [0m[32mok[0m [0m[38;5;245m(24ms)[0m
+MISMATCH: the recomputed value wins and the disagreement is surfaced ... [0m[32mok[0m [0m[38;5;245m(343µs)[0m
+exactly one tier tag: zero, two, or a non-ladder value all violate ... [0m[32mok[0m [0m[38;5;245m(362µs)[0m
+a tier tag with no req/opt tags violates (absent is not none) ... [0m[32mok[0m [0m[38;5;245m(160µs)[0m
+a field declared both required and optional violates ... [0m[32mok[0m [0m[38;5;245m(170µs)[0m
+sentinel consistency is advisory, not a hard gate ... [0m[32mok[0m [0m[38;5;245m(218µs)[0m
+assertAnnouncementTags throws on a violation, returns otherwise ... [0m[32mok[0m [0m[38;5;245m(769µs)[0m
+the max-only tier makes the coarse filter a single server-side REQ ... [0m[32mok[0m [0m[38;5;245m(265µs)[0m
+
+[0m[32mok[0m | 24 passed | 0 failed [0m[38;5;245m(298ms)[0m
+
+exit=0
