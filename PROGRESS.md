@@ -86,3 +86,27 @@ verification, and the ADR-0012 escalation state machine.
 - Suite: 216 pass / 1 skip / 0 fail (217 tests / 35 files). `tsc --noEmit` exit 0.
 - Evidence: `src/evidence/output/{red_before,run1,run2,run3,dm_delivery,mutation,suite,typecheck,armed}.txt`.
 - Everything committed and pushed. No unpushed commits.
+
+## t_5b30bdec — settled-replay must re-bind the presented proof to the order (2026-10-10)
+- finding (cross-family review of t_e19ad2e9, F4): `ExplicitGate.gate` returned the cached
+  result for `status === "settled"` keyed on `orderId` alone, never looking at `args.proof` |
+  status: CONFIRMED on github/main e2a7065 (probe: different proof / no proof / valid-but-other-order
+  proof all RETURN the cached result) | files: src/payment.ts
+- fix: the digest of the proof that settled the order is recorded in the SAME atomic claim
+  (`GateOrder.proofHash`, mirroring `PaymentIntent.proofHash` + the intent store's sha256 rule), and a
+  replay must present matching evidence before the cached result is returned; otherwise
+  `SettlementEvidenceMismatchError` (-32006, no invoice in `data`, so a client is not invited to pay a
+  settled order twice) | files: src/payment.ts, src/gate-store.ts (proof_hash column + ALTER migration,
+  COALESCE so a later write cannot erase the binding)
+- scope decision: an order settled WITHOUT a client proof (invoice-polling pmi, or a legacy row) keeps
+  the documented no-proof idempotency contract — there is no client-held evidence to bind — but a
+  replay that attaches a proof to it is refused. Rationale + residual (orderId possession is still the
+  only handle for a poll-verified pmi) in REPORT-t_5b30bdec.md §4/§5.
+- red-before: e2a7065, probe returns the cached result on every replay (evidence/replay_proof_binding.red.txt)
+- mutation: removing the single `assertReplayedEvidence` call -> 8 pass / 6 fail
+  (evidence/replay_proof_binding.mutation.txt)
+- green: 14/14 new tests (src/replay_binding.test.ts); `bun run test` 235 pass / 1 skip / 0 fail
+  (36 files, was 216/1/0 on e2a7065); `bun run typecheck` rc=0 (evidence/replay_proof_binding.suite.txt)
+- not fixed here (reported): out-of-repo consumers of `ExplicitGate` (cvm-ppq, cvm-nanogpt) must be
+  audited for replays that present different payment evidence; `SqliteGateStore` still has no reaper
+  for a row stuck at `settlement_reserved` (finding F2 of the same review).

@@ -1,4 +1,24 @@
 /** CEP-8 payment surface: `cap` prices, `pmi`, explicit gating and idempotency. */
+import { createHash } from "node:crypto";
+
+/**
+ * Digest of a client-supplied payment proof (a Cashu token, say). Only the digest
+ * is ever stored, never the token itself: a stolen gate database must not be
+ * replayable against the mint as a bearer instrument. Same rule (and same
+ * digest) as the fiat intent store's `PaymentIntent.proofHash`.
+ */
+export function proofHash(proof: string): string {
+  return createHash("sha256").update(proof).digest("hex");
+}
+
+/**
+ * Normalised proof digest: an absent or empty proof means "no evidence
+ * presented", which is distinct from a digest. A caller cannot smuggle an
+ * empty string in as evidence.
+ */
+function proofDigest(proof: string | undefined): string | undefined {
+  return typeof proof === "string" && proof.length > 0 ? proofHash(proof) : undefined;
+}
 
 export interface Cap {
   /** e.g. "tool:run_code" */
@@ -90,6 +110,30 @@ export class GateOrderStateError extends Error {
   }
 }
 
+/**
+ * A replay presented payment evidence that does not match the evidence the order
+ * was settled with - a different proof, a proof that paid another order, no proof
+ * where one is required, or a proof attached to an order that was settled without
+ * one. Fail closed: the cached result is NOT returned.
+ *
+ * Deliberately does NOT carry an invoice in `data`, unlike PaymentRequiredError.
+ * The order is already settled, so re-presenting its invoice would only invite a
+ * second payment for work that is already paid; the caller can recover the
+ * cached result only by presenting the evidence that paid it.
+ */
+export class SettlementEvidenceMismatchError extends Error {
+  readonly code = -32006;
+  readonly data: { orderId: string; reason: string };
+  constructor(
+    readonly orderId: string,
+    readonly reason: string,
+  ) {
+    super(`settlement_evidence_mismatch: ${reason}`);
+    this.name = "SettlementEvidenceMismatchError";
+    this.data = { orderId, reason };
+  }
+}
+
 export function parseCapTags(tags: string[][]): Cap[] {
   const caps: Cap[] = [];
   for (const t of tags) {
@@ -122,6 +166,13 @@ export interface GateOrder {
   result?: unknown;
   /** Why a settlement failed. Recorded so a retry can be refused without re-running. */
   failure?: { message: string; at: number };
+  /**
+   * sha256 of the payment proof that settled this order, or undefined when the
+   * order was settled without a client proof (an invoice-polling pmi such as
+   * Lightning, or a row written before this field existed). A replay must
+   * present the same evidence before the cached result is handed back.
+   */
+  proofHash?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -133,8 +184,17 @@ export interface GateOrderStore {
    * Atomically move `orderId` from `from` to `to`, returning true only for the
    * caller that performed the transition. Exactly one concurrent caller can win,
    * which is what stops two fiat attempts against a single sats payment.
+   *
+   * When `proofHash` is given, the payment evidence is recorded in the SAME
+   * statement as the transition, so an order can never be claimed without the
+   * evidence that paid for it - not even across a crash.
    */
-  claim(orderId: string, from: GateOrderStatus, to: GateOrderStatus): boolean;
+  claim(
+    orderId: string,
+    from: GateOrderStatus,
+    to: GateOrderStatus,
+    proofHash?: string,
+  ): boolean;
 }
 
 export class MemoryOrderStore implements GateOrderStore {
@@ -142,10 +202,14 @@ export class MemoryOrderStore implements GateOrderStore {
   get(id: string) { return this.m.get(id); }
   put(o: GateOrder) { this.m.set(o.orderId, o); }
   // Synchronous and without an await: the check-and-set cannot interleave.
-  claim(id: string, from: GateOrderStatus, to: GateOrderStatus): boolean {
+  claim(id: string, from: GateOrderStatus, to: GateOrderStatus, proofHash?: string): boolean {
     const cur = this.m.get(id);
     if (!cur || cur.status !== from) return false;
-    this.m.set(id, { ...cur, status: to, updatedAt: Date.now() });
+    const next: GateOrder = { ...cur, status: to, updatedAt: Date.now() };
+    // Never erase a recorded binding with an absent one: only a caller that
+    // presents evidence sets it.
+    if (proofHash !== undefined) next.proofHash = proofHash;
+    this.m.set(id, next);
     return true;
   }
 }
@@ -193,7 +257,12 @@ export class ExplicitGate {
     }
 
     if (order.status === "settled") {
-      // Replay: return the cached result, never re-run the tool.
+      // Replay: return the cached result, never re-run the tool - but only to a
+      // caller that presents the payment evidence this order was settled with.
+      // `orderId` is client-supplied, so keying the cached result on it alone
+      // let a different proof, a proof that paid a different order, or no proof
+      // at all collect a result somebody else paid for.
+      this.assertReplayedEvidence(order, args.proof);
       return order.result as T;
     }
 
@@ -250,7 +319,13 @@ export class ExplicitGate {
     }
     // Claim the right to settle exactly once. The loser must NOT run the action:
     // that is how one sats payment became two fiat attempts before this fix.
-    const won = this.store.claim(order.orderId, "awaiting_payment", "settlement_reserved");
+    const evidence = proofDigest(args.proof);
+    const won = this.store.claim(
+      order.orderId,
+      "awaiting_payment",
+      "settlement_reserved",
+      evidence,
+    );
     if (!won) throw new SettlementInProgressError(order.orderId);
 
     try {
@@ -259,6 +334,9 @@ export class ExplicitGate {
         const done = this.store.get(order.orderId) ?? order;
         done.status = "settled";
         done.result = result;
+        // A settled row must always carry the evidence that paid for it, even if
+        // a store implementation dropped it on the way through.
+        if (done.proofHash === undefined && evidence !== undefined) done.proofHash = evidence;
         done.updatedAt = Date.now();
         this.store.put(done);
       } catch {
@@ -283,5 +361,30 @@ export class ExplicitGate {
       }
       throw err;
     }
+  }
+
+  /**
+   * A settled order hands back its cached result only to a caller that presents
+   * the payment evidence the order was settled with:
+   *
+   *  - a proof-settled order (CEP-8 Cashu: `verify` redeems the client's token)
+   *    requires a proof whose digest equals the recorded one. A different proof,
+   *    a proof that paid another order, or no proof at all is refused;
+   *  - an order settled without a client proof (an invoice-polling pmi such as
+   *    Lightning, or a legacy row) keeps the documented idempotency contract for
+   *    a no-proof replay - there is no client-held evidence to bind - but a
+   *    replay that attaches a proof is refused: that proof demonstrably did not
+   *    pay this order.
+   */
+  private assertReplayedEvidence(order: GateOrder, proof?: string): void {
+    const presented = proofDigest(proof);
+    if (presented === order.proofHash) return;
+    const reason =
+      order.proofHash === undefined
+        ? "order was settled without a client proof; a proof cannot be bound to it on replay"
+        : presented === undefined
+          ? "replay presented no proof; the proof that settled this order is required"
+          : "the presented proof is not the proof that settled this order";
+    throw new SettlementEvidenceMismatchError(order.orderId, reason);
   }
 }
