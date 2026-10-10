@@ -54,6 +54,37 @@ row is still `settlement_reserved` and the worst case is a replay reporting "in 
 second run. Same for the failure path: a failed terminal write must not be swallowed, and the row
 staying `settlement_reserved` fails closed.
 
+### 4b. A stuck `settlement_reserved` row: accepted dead-end + operator recovery (review F2)
+`claim()` moves `awaiting_payment -> settlement_reserved` **before** the action runs, deliberately:
+that is what makes a paid intent single-shot. The cost is a state a process cannot leave on its own -
+if the worker dies between `claim()` and the terminal `put()`, or the terminal write itself fails,
+the row stays `settlement_reserved` and every later call throws `SettlementInProgressError` (-32003)
+forever. **This is accepted and correct**: the alternative (auto-retry) is exactly the double-spend
+this gate exists to prevent, and nothing inside the gate can decide "did the action run?" from the
+row alone. It is written down here because it needs a human, not a retry loop.
+
+Impact: one order. The customer has paid and can obtain neither the result nor a failure - the
+service reports "in progress" indefinitely. The row is per-order, so other orders are unaffected.
+
+Operator recovery (manual, per order; there is no automatic path, by design):
+1. Find stuck rows:
+   `sqlite3 "$GATE_DB" "select order_id, updated_at, failure_json from gate_orders where status='settlement_reserved'"`
+   (`$GATE_DB` is the service's gate database, e.g. `/var/lib/loom/cvm-<svc>/gate.sqlite`.)
+2. Decide whether the downstream action ran, from a source **outside** the row: the provider/venue
+   ledger or receipt for that `order_id`, the downstream service's own order store, and its logs.
+3. If it did **not** run - release the claim so a retry re-drives it:
+   `sqlite3 "$GATE_DB" "update gate_orders set status='awaiting_payment', updated_at=<now> where order_id='<id>' and status='settlement_reserved'"`
+4. If it **did** run - write the terminal state so replays return the recorded outcome instead of
+   "in progress":
+   `sqlite3 "$GATE_DB" "update gate_orders set status='settled', updated_at=<now> where order_id='<id>' and status='settlement_reserved'"`
+   (a genuinely failed action takes `status='settlement_failed'` with `failure_json` set, which
+   replays re-throw - see section 2.)
+5. Both statements carry `and status='settlement_reserved'`, so a concurrent claim wins the race and
+   the operator's update becomes a no-op instead of overwriting a live transition.
+
+Do not script this to run unattended, and do not "fix" the gate by adding a timeout-based automatic
+retry: step 2 cannot be automated from inside the gate, and guessing it wrong re-runs a paid action.
+
 ### 5. `paid` is no longer reported as a settlement failure (behaviour change, flagged)
 The body mapped a legacy `paid` row onto `SettlementFailedError`. That asserts the action FAILED,
 which is not known - the old code wrote `paid` **before** the action ran, so the outcome is
@@ -107,15 +138,21 @@ Re-measured against this card's suite (`evidence/mutation_M1_snapshot_cache.txt`
 | mutation of `SqliteGateStore.claim` | result |
 | --- | --- |
 | decide from a status snapshot cached by `put()`/`get()` (M1) | **2 fail - caught** |
-| decide from a lazily-primed read, `UPDATE` unguarded (M2, TOCTOU shape) | 1 round: caught **4 of 6** runs; **4 rounds: 6 of 6** |
+| decide from a lazily-primed read, `UPDATE` unguarded (M2, TOCTOU shape) | 1 round: caught **4 of 6** runs; **4 rounds: also 4 of 6** (runs 4 and 5 survived) |
 
 M1 is now caught by the truth-table and cross-connection tests - the suite that called it invisible
-has grown teeth. M2 needed more than a fix to the test: the losing window is one synchronous
-statement pair, so it only trips when two processes genuinely interleave. Rather than raise a
-flaky-test tolerance, the concurrency invariant now runs **4 independent rounds**
-(`~1 - (1/3)^4 ≈ 99%`), measured 6/6 on the mutant and 13/13 clean on the fixed tree. An
-implementation that answers from a comparison instead of a statement is still caught
-**deterministically** by the truth table, which is the assertion that carries the guarantee.
+has grown teeth. M2 is a **process-interleaving** mutant, not a logic mutant: the losing window is
+one synchronous statement pair, so it only trips when two processes genuinely overlap. The
+concurrency invariant runs **4 independent rounds**, and on the committed 6-run measurement the
+strengthened suite caught the mutant **4 of 6** runs - the same rate as the single round, so this
+sample shows **no measured improvement**. Corrected 2026-10-10 (review F1): the row previously read
+"4 rounds: 6 of 6" and the paragraph below derived a `~1-(1/3)^4 ≈ 99%` detection figure from it,
+both of which the log in `evidence/mutation_M2_strengthened.txt` refutes (run4 and run5 are
+`13 pass / 0 fail`). **No 99%, and no per-run detection percentage, is claimed for this test.** What
+carries the guarantee is not the timing-dependent round loop but the **deterministic** truth-table
+and cross-connection tests: an implementation that answers from a comparison instead of a statement
+is caught there on every run, which is why M1 went from "not caught" to **caught**. The 4-round loop
+remains as defence in depth for the interleaving shape, with its real measured rate stated above.
 
 ### Verification (this card's run, bun 1.4.2 / deno 2.9.0)
 ```

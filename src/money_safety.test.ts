@@ -310,7 +310,7 @@ describe("SqliteGateStore money safety", () => {
     store2.close();
   }, SLOW);
 
-  test("a concurrent writer makes claim lose the CAS, not throw a raw SQLite error", async () => {
+  test("lock contention busy-waits and then claims cleanly, never throwing raw SQLITE_BUSY", async () => {
     // `claim` is called AFTER `verify` accepted a real payment, so a raw
     // SQLITE_BUSY escaping from it turns a paid call into an opaque 500. Worse,
     // the same throw from the terminal `put()` leaves the row at
