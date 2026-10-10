@@ -123,6 +123,15 @@ The no-proof idempotency row above is a deliberate boundary, not an oversight:
   receive `-32006` instead of a cached result. That is the intended fail-closed
   behaviour, but it is a behaviour change on the wire and needs the same treatment as
   the in-repo consumers.
+- **The binding is on the proof STRING the processor was handed, not on the payment it
+  represents** (finding F2 of the round-1 review of this fix — accepted, tested). A retry that
+  no longer holds that exact string is refused with `-32006`: a wallet that pruned the redeemed
+  token, or one that re-serialises it (Cashu v3↔v4 encoding of the same proofs hashes
+  differently). The ordinary retry — the same string, the case a lost response produces — is
+  pinned by test and still returns the cached result. Closing the re-serialised case properly
+  needs a processor-supplied stable `evidenceKey` (the token's secret set, not its serialisation)
+  via a `PaymentProcessor` interface change, because only the processor knows what identity it
+  actually redeemed. Recorded as the follow-up rather than guessed at in the gate.
 - **`SqliteGateStore` still has no reaper** for a row stuck at `settlement_reserved`
   (finding F2 of the same review) — untouched by this card.
 - **The refusal is keyed on the digest, not on a verified re-redemption.** That is
@@ -151,6 +160,115 @@ never erased by a later transition or a losing claim; G the unpaid path is uncha
 
 ## 7. Cross-family review
 
-See the section appended below by the review run (reviewer: chutes
-`moonshotai/Kimi-K3-TEE`, per the card's instruction — the local router's
-`kimi-k3`/`glm-5.3` are served by DeepSeek and satisfy no cross-family gate).
+Round 1 — reviewer: chutes `moonshotai/Kimi-K3-TEE` (per the card's instruction: the local
+router's `kimi-k3`/`glm-5.3` are served by DeepSeek and satisfy no cross-family gate), reviewed
+head `f8cbe15`, verdict **REQUEST_CHANGES, 7 findings**:
+`~/reports/reviews/contextvm-services-t_5b30bdec-Kimi-K3-TEE-review.md`.
+
+## 8. Round 2 — adjudication of the 7 findings
+
+Every finding was checked against the code before it was answered. Four produced changes; the
+rest are answered with the evidence that makes them moot, or recorded as an accepted tradeoff
+with the reason it is accepted.
+
+| # | severity | disposition |
+|---|---|---|
+| F1 | major | **REAL, FIXED** — `MemoryOrderStore.put` was an unconditional set |
+| F2 | major | **ACCEPTED + DOCUMENTED** — the false positive is inherent to binding on the presented proof |
+| F3 | conditional major | **PREMISE CONFIRMED, NOT REACHABLE** — `verify()` does precede `claim()` (L371 < L384), but the stranding branch needs two distinct proofs accepted for one invoice |
+| F4 | minor | **MITIGATED AT RUNTIME** — the settle-path round-trip check, not the interface |
+| F5 | minor | **REAL, FIXED** — `presentedProof()` normalisation |
+| F6 | nit | **FIXED** — one uniform refusal reason |
+| F7 | nit | **FIXED** — constant-time digest compare |
+
+**F1 (real, fixed).** The reviewer is right and the asymmetry was real: `SqliteGateStore.put`
+COALESCEd a recorded digest, `MemoryOrderStore.put` did `this.m.set(o.orderId, o)`. A `put()`
+built from a stale pre-claim object therefore erased the binding on the memory store only —
+silently re-opening exactly the hole this card closes, on the store the tests blessed. Fixed
+by merging a recorded digest in `put()` (only a `claim()`, or a write that carries evidence,
+sets one). Mutation M1 (revert `put()` to the unconditional set) → **2 tests fail**, so the
+new coverage is not decorative.
+
+**F2 (accepted, now documented).** Correctly identified as the designed tradeoff, and the
+reviewer's concrete trigger is exactly right: the binding is a digest of the *string the
+processor was handed*, so a retry that no longer holds that string — a wallet that pruned the
+redeemed token, or re-serialised it (Cashu v3↔v4) — is refused with `-32006`. This is the
+direct cost of the fix: the only alternative that accepts it is trusting `orderId` alone,
+which is the hole. What the round-2 change adds is that the tradeoff is now **explicit and
+tested** rather than incidental:
+
+- test *"a retry with the same proof after a lost response returns the cached result"* pins
+  the ordinary retry (the case the reviewer asked to be sure still works): same result, action
+  not re-run, one payment;
+- test *"characterisation: a re-serialised proof is NOT the same evidence (accepted boundary)"*
+  pins the refused case, so the boundary cannot move silently;
+- the proper closure — a processor-supplied stable `evidenceKey` (the token's secret set, not
+  its serialisation) — is recorded in §5 as the follow-up, because it is an interface change
+  for every `PaymentProcessor`, not a gate-side guess.
+
+**F3 (premise confirmed, branch not reachable).** The reviewer flagged it as *conditional* on
+the ordering, and COULD_NOT_VERIFY'd the ordering because the hunk boundary hid it. Answer from
+the source: `await this.processor.verify(order.invoice, proof)` is at `src/payment.ts:371`, the
+`this.store.claim(...)` is at `:384` — **verify precedes claim**, so the reviewer's premise
+holds. The stranding branch still needs a processor that returns `true` for two *distinct*
+proofs on one invoice: that is a double payment accepted by the pmi, i.e. a processor defect
+outside this diff. The reachable race — two concurrent first-calls paying with the *same* proof
+— is now pinned deterministically (a rendezvous processor parks both callers inside `verify()`,
+so the race is real rather than timing-dependent): one call settles, exactly one action runs,
+the loser gets `SettlementInProgressError`, and the loser's own proof then collects the cached
+result. Not stranded.
+
+**F4 (mitigated at runtime).** Making `proofHash` a required parameter was tried and reverted:
+TypeScript compares parameters bivariantly, so a required extra parameter does **not** force an
+existing `implements GateOrderStore` to pass a digest — it would only look like it did. The
+mitigation is therefore runtime and stronger: after the settle write, the gate re-reads the row
+and fails closed with `SettlementBindingNotPersistedError` if the recorded digest did not land,
+so a store that drops the field on `claim` *and* `put` cannot hand back an unbound settled
+order — it throws. Mutation M2 (remove that round-trip check) → **1 test fails**.
+
+**F5 (real, fixed).** `presentedProof()` now normalises the client value once in `gate()` and
+the normalised value is what is used for `verify()`, for the binding and for the replay check;
+a non-string or empty value is not evidence anywhere. The F5 test uses a **coercing** processor
+(one that accepts any non-`undefined` proof — a `redeem(String(proof))` redeemer), because a
+processor that already rejects unknown strings cannot distinguish the mutant; the first version
+of this test used `ProofProcessor` and was therefore vacuous against M3, which the mutation run
+caught. Mutation M3 (coerce instead of reject) → **1 test fails**.
+
+**F6 (fixed).** All three mismatch shapes now throw one reason,
+`settlement_evidence_mismatch`. The previous reasons distinguished "settled without a client
+proof" from "a proof is required", which told a caller who presented nothing whether a guessed
+`orderId` had been settled with a client proof — a settlement-method oracle — in exchange for
+no caller-side benefit (the caller knows what it presented). Mutation M4 (re-differentiate the
+reasons) → **1 test fails**.
+
+**F7 (fixed).** Digests are compared with `digestEquals()` (`timingSafeEqual` over the encoded
+digests, length-checked first). Defence in depth only: the digest is not a usable secret, as
+the reviewer notes.
+
+**Considered and rejected: the `-32006` collision with `refusals.ts` `rail_unavailable`.**
+Raising it would be defensible in isolation, but this kit's convention is that the stable
+`reason` string discriminates and the JSON-RPC code is a coarse bucket — `refusals.ts` maps
+three distinct reasons (`unknown_tool`, `unsupported_language`, `amount_too_large`) to a single
+`-32602`, and `-32005`/`-32003`/`-32007` are each reused across modules on `main`. Changing the
+code here would be inconsistent with that convention and would not add a discriminating bit.
+Recorded rather than silently ignored.
+
+## 9. Round 2 — verification (re-executed)
+
+| item | result |
+|---|---|
+| `bun test src/replay_binding.test.ts` | **23 pass / 0 fail** (75 `expect()` calls) |
+| `bun run test` | **244 pass / 1 skip / 0 fail** (245 tests / 36 files) |
+| `bun run typecheck` | `tsc --noEmit` exit **0** |
+| `deno task check` | exit **0** |
+| `deno task test` | **24 passed / 0 failed** |
+| Mutation M1 (`put` unconditional) | 2 fail — caught |
+| Mutation M2 (round-trip check removed) | 1 fail — caught |
+| Mutation M3 (`presentedProof` coerces) | 1 fail — caught |
+| Mutation M4 (re-differentiated reasons) | 1 fail — caught |
+| source restored byte-identical after mutation | yes |
+
+`evidence/replay_proof_binding.mutation_round2.txt` is the raw mutation transcript. Round 2 was
+committed and pushed to **both** remotes as `f59412f` (github + ngit/`origin`, read back with
+`git ls-remote`), on top of the round-1 commit `f8cbe15`.
+

@@ -22,3 +22,26 @@ originals (`replay_proof_binding.red.txt`, `.fixed.txt`, `.mutation.txt`,
 Environment: bun 1.4.2. The `e2a7065` worktree was removed after the run
 (`git worktree remove`), so no verification artifact is left outside this task's
 worktree.
+
+## Round 2 (after the cross-family review returned REQUEST_CHANGES, 7 findings)
+
+Fixes for F1/F5/F6/F7 and the F2/F3 behaviour pins were committed as `f59412f`
+(pushed to github + ngit/`origin`, verified with `git ls-remote` on both).
+
+| item | command | result |
+|---|---|---|
+| targeted | `bun test src/replay_binding.test.ts` | **23 pass / 0 fail**, 75 `expect()` calls |
+| suite | `bun run test` | **244 pass / 1 skip / 0 fail**, 245 tests / 36 files |
+| types | `bun run typecheck` | `tsc --noEmit` exit **0** |
+| deno | `deno task check` / `deno task test` | exit **0** / **24 passed, 0 failed** |
+| mutation M1 (`MemoryOrderStore.put` back to an unconditional set) | `python3 /tmp/t5b30_mutation2.py` | **2 fail** — the F1 test is load-bearing |
+| mutation M2 (F4 settle-path round-trip check removed) | same | **1 fail** |
+| mutation M3 (`presentedProof` coerces non-strings) | same | **1 fail** |
+| mutation M4 (per-case refusal reasons restored) | same | **1 fail** |
+
+Raw transcript: `replay_proof_binding.mutation_round2.txt`. Note on M3: it was
+NOT caught by the first version of the F5 test (which used a processor that
+already rejects unknown strings, so it could not tell coercion from rejection);
+the test was rewritten against a coercing processor and M3 then failed. That is
+recorded because a mutation run that catches nothing is itself a finding.
+
