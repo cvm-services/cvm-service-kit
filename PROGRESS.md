@@ -110,3 +110,37 @@ verification, and the ADR-0012 escalation state machine.
 - not fixed here (reported): out-of-repo consumers of `ExplicitGate` (cvm-ppq, cvm-nanogpt) must be
   audited for replays that present different payment evidence; `SqliteGateStore` still has no reaper
   for a row stuck at `settlement_reserved` (finding F2 of the same review).
+
+## Round 2 (2026-10-10) — cross-family review of the fix returned REQUEST_CHANGES, 7 findings
+
+Artifact: ~/reports/reviews/contextvm-services-t_5b30bdec-Kimi-K3-TEE-review.md (moonshotai/Kimi-K3-TEE,
+chutes direct, reviewed head f8cbe15). All 7 adjudicated; 4 produced code/test changes:
+
+- F1 (major, real): `MemoryOrderStore.put` was an unconditional set, so a write built from a stale
+  pre-claim object erased the binding on the memory store while sqlite COALESCEd it. Fixed: `put` now
+  merges a recorded digest. Mutation M1 (revert to unconditional set) -> 2 fail.
+- F2 (major, accepted + now documented): a retry that no longer holds the exact same proof STRING
+  (pruned or re-serialised token, v3<->v4 encoding) is refused. Binding on the presented proof is the
+  point; the alternative is the hole. Recovery for the ordinary retry (same proof string) is pinned by
+  test; the re-serialised case is pinned as a characterisation test; the residual gap and the proper
+  fix (processor-supplied stable `evidenceKey`) are recorded in REPORT §6.
+- F3 (conditional major, resolved): confirmed in code that `verify()` (L371) runs BEFORE `claim()`
+  (L384), so the reviewer's premise held. The stranding branch needs two DISTINCT proofs accepted for
+  one invoice (a processor-level double-payment). The reachable same-proof race is pinned by test: the
+  loser gets SettlementInProgressError, exactly one action runs, and the loser's own proof then collects
+  the cached result.
+- F4 (minor, mitigated): `proofHash?` stays optional (a required param would not force implementors -
+  TS bivariance), so the mitigation is runtime: the settle-path round-trip check fails closed with
+  SettlementBindingNotPersistedError. Mutation M2 (drop the check) -> 1 fail.
+- F5 (minor, fixed): `presentedProof()` normalises once; a non-string is never evidence. Mutation M3
+  (coerce instead) -> 1 fail; the test uses a COERCING processor, because a processor that already
+  rejects unknown strings cannot distinguish the mutant.
+- F6 (nit, fixed): one uniform `settlement_evidence_mismatch` reason for every mismatch shape - the
+  per-case reasons were a settlement-method oracle. Mutation M4 (re-differentiate) -> 1 fail.
+- F7 (nit, fixed): digest compare is now constant-time (`digestEquals` via timingSafeEqual).
+- considered + rejected: the -32006 code collision with refusals.ts `rail_unavailable`. The kit's
+  convention is that the stable `reason` string discriminates (refusals.ts maps three reasons to
+  -32602); codes are coarse buckets and collisions are pre-existing and endemic.
+- round-2 green: 23/23 in src/replay_binding.test.ts (75 expect); `bun run test` 244 pass / 1 skip /
+  0 fail; `bun run typecheck` rc=0; `deno task check` rc=0; `deno task test` 24 passed/0 failed.
+- round-2 mutation: evidence/replay_proof_binding.mutation_round2.txt (M1/M2/M3/M4 all caught).

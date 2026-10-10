@@ -1,5 +1,5 @@
 /** CEP-8 payment surface: `cap` prices, `pmi`, explicit gating and idempotency. */
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 /**
  * Digest of a client-supplied payment proof (a Cashu token, say). Only the digest
@@ -12,12 +12,42 @@ export function proofHash(proof: string): string {
 }
 
 /**
+ * The proof as the gate treats it: a non-empty string, or nothing. `args.proof`
+ * arrives over JSON-RPC untyped, so a non-string (or empty) value is not
+ * evidence. Normalising it in ONE place means a processor that would otherwise
+ * have coerced it cannot settle an order with `evidence === undefined`, which
+ * would leave that order replayable by `orderId` alone - the hole this card
+ * exists to close.
+ */
+function presentedProof(proof: unknown): string | undefined {
+  return typeof proof === "string" && proof.length > 0 ? proof : undefined;
+}
+
+/**
  * Normalised proof digest: an absent or empty proof means "no evidence
  * presented", which is distinct from a digest. A caller cannot smuggle an
  * empty string in as evidence.
  */
 function proofDigest(proof: string | undefined): string | undefined {
-  return typeof proof === "string" && proof.length > 0 ? proofHash(proof) : undefined;
+  const p = presentedProof(proof);
+  return p === undefined ? undefined : proofHash(p);
+}
+
+/**
+ * Compare two recorded/presented digests without short-circuiting on the first
+ * differing byte. Both sides are fixed-width sha256 hex and a digest is not a
+ * usable secret (the token behind it is preimage-protected), so this is defence
+ * in depth, not a fix for a live leak - it costs one call and removes a
+ * byte-at-a-time oracle if a digest is ever compared against caller input in a
+ * context where the timing is measurable.
+ */
+function digestEquals(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  const enc = new TextEncoder();
+  const ea = enc.encode(a);
+  const eb = enc.encode(b);
+  if (ea.length !== eb.length) return false;
+  return timingSafeEqual(ea, eb);
 }
 
 export interface Cap {
@@ -134,6 +164,26 @@ export class SettlementEvidenceMismatchError extends Error {
   }
 }
 
+/**
+ * The store accepted the settlement write but did not keep the evidence digest
+ * (cross-family review finding F4). Without it the order is replayable by
+ * `orderId` alone - the hole this card closes - so this fails closed and loudly
+ * instead of handing back a result whose binding is not durable. Not reachable
+ * with the bundled stores; it exists so a custom `GateOrderStore` cannot
+ * reintroduce the hole silently.
+ */
+export class SettlementBindingNotPersistedError extends Error {
+  readonly code = -32007;
+  readonly data: { orderId: string; reason: string };
+  constructor(readonly orderId: string) {
+    super(
+      "settlement_binding_not_persisted: the store did not record the payment evidence for this settled order",
+    );
+    this.name = "SettlementBindingNotPersistedError";
+    this.data = { orderId, reason: "the store did not persist the proof digest" };
+  }
+}
+
 export function parseCapTags(tags: string[][]): Cap[] {
   const caps: Cap[] = [];
   for (const t of tags) {
@@ -188,6 +238,12 @@ export interface GateOrderStore {
    * When `proofHash` is given, the payment evidence is recorded in the SAME
    * statement as the transition, so an order can never be claimed without the
    * evidence that paid for it - not even across a crash.
+   *
+   * CONTRACT for implementors: a store must persist `GateOrder.proofHash` and
+   * must not clear a recorded one with a write that carries no digest (the
+   * bundled stores both COALESCE). `ExplicitGate` re-reads the row after
+   * settling and fails closed if the binding did not land, so a store that
+   * silently drops it cannot hand out an unbound settled order.
    */
   claim(
     orderId: string,
@@ -200,7 +256,22 @@ export interface GateOrderStore {
 export class MemoryOrderStore implements GateOrderStore {
   private readonly m = new Map<string, GateOrder>();
   get(id: string) { return this.m.get(id); }
-  put(o: GateOrder) { this.m.set(o.orderId, o); }
+  /**
+   * Same "a write that carries no evidence must never unbind an order" rule as
+   * `SqliteGateStore.put`'s `COALESCE`. Without it the two bundled stores
+   * disagreed: a `put()` of a stale order object (built from a pre-claim read,
+   * say) would wipe the binding on the memory store and re-open the
+   * orderId-only replay hole. Only a `claim()` - or a put that carries evidence
+   * - sets a digest.
+   */
+  put(o: GateOrder) {
+    const cur = this.m.get(o.orderId);
+    if (o.proofHash === undefined && cur?.proofHash !== undefined) {
+      this.m.set(o.orderId, { ...o, proofHash: cur.proofHash });
+      return;
+    }
+    this.m.set(o.orderId, o);
+  }
   // Synchronous and without an await: the check-and-set cannot interleave.
   claim(id: string, from: GateOrderStatus, to: GateOrderStatus, proofHash?: string): boolean {
     const cur = this.m.get(id);
@@ -234,6 +305,10 @@ export class ExplicitGate {
     proof?: string;
     run: () => Promise<T>;
   }): Promise<T> {
+    // Normalise the client-supplied evidence ONCE. A non-string (or empty)
+    // proof is not evidence anywhere below: it cannot settle an order unbound,
+    // and it cannot satisfy a replay.
+    const proof = presentedProof(args.proof);
     let order = this.store.get(args.orderId);
 
     if (!order) {
@@ -262,7 +337,7 @@ export class ExplicitGate {
       // `orderId` is client-supplied, so keying the cached result on it alone
       // let a different proof, a proof that paid a different order, or no proof
       // at all collect a result somebody else paid for.
-      this.assertReplayedEvidence(order, args.proof);
+      this.assertReplayedEvidence(order, proof);
       return order.result as T;
     }
 
@@ -307,7 +382,10 @@ export class ExplicitGate {
         );
     }
 
-    const paid = await this.processor.verify(order.invoice, args.proof);
+    // `proof` is the normalised evidence (non-string input is not evidence), so
+    // a processor that would have coerced a non-string can no longer settle an
+    // order without a recorded binding.
+    const paid = await this.processor.verify(order.invoice, proof);
     if (!paid) {
       throw new PaymentRequiredError("payment_required", {
         orderId: order.orderId,
@@ -319,7 +397,7 @@ export class ExplicitGate {
     }
     // Claim the right to settle exactly once. The loser must NOT run the action:
     // that is how one sats payment became two fiat attempts before this fix.
-    const evidence = proofDigest(args.proof);
+    const evidence = proofDigest(proof);
     const won = this.store.claim(
       order.orderId,
       "awaiting_payment",
@@ -330,6 +408,7 @@ export class ExplicitGate {
 
     try {
       const result = await args.run();
+      let persisted = true;
       try {
         const done = this.store.get(order.orderId) ?? order;
         done.status = "settled";
@@ -344,6 +423,20 @@ export class ExplicitGate {
         // Never mask a completed action behind a storage error: the row is still
         // `settlement_reserved`, so the worst case is a replay that reports
         // "in progress" - never a second run of the action.
+        persisted = false;
+      }
+      // F4: the write was ACCEPTED but the digest did not land, so this settled
+      // order would be replayable by `orderId` alone - exactly the hole this card
+      // closes. Fail closed and loudly rather than hand back a result whose
+      // binding is not durable. Checked only when the store accepted the write: a
+      // store that was merely down leaves the row `settlement_reserved`, which the
+      // documented "in progress" contract already covers.
+      if (
+        persisted &&
+        evidence !== undefined &&
+        this.store.get(order.orderId)?.proofHash !== evidence
+      ) {
+        throw new SettlementBindingNotPersistedError(order.orderId);
       }
       return result;
     } catch (err) {
@@ -378,13 +471,12 @@ export class ExplicitGate {
    */
   private assertReplayedEvidence(order: GateOrder, proof?: string): void {
     const presented = proofDigest(proof);
-    if (presented === order.proofHash) return;
-    const reason =
-      order.proofHash === undefined
-        ? "order was settled without a client proof; a proof cannot be bound to it on replay"
-        : presented === undefined
-          ? "replay presented no proof; the proof that settled this order is required"
-          : "the presented proof is not the proof that settled this order";
-    throw new SettlementEvidenceMismatchError(order.orderId, reason);
+    if (digestEquals(presented, order.proofHash)) return;
+    // ONE reason for every mismatch shape. Distinguishing "this order was settled
+    // without a client proof" from "a proof is required" told any caller who
+    // presented nothing whether a guessed `orderId` was settled with a client
+    // proof - a settlement-method oracle - for no caller-side benefit: the caller
+    // already knows what it presented. The operator can read the row for detail.
+    throw new SettlementEvidenceMismatchError(order.orderId, "settlement_evidence_mismatch");
   }
 }

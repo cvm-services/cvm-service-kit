@@ -1,0 +1,5 @@
+M1 MemoryOrderStore.put unconditional: exit=1 :: 21 pass | 2 fail
+M2 F4 round-trip check removed: exit=1 :: 22 pass | 1 fail
+M3 presentedProof coerces non-strings: exit=1 :: 22 pass | 1 fail
+M4 mismatch reason distinguishes settlement method again: exit=1 :: 22 pass | 1 fail
+restored identical: True

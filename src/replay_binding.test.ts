@@ -27,7 +27,10 @@ import {
   ExplicitGate,
   MemoryOrderStore,
   PaymentRequiredError,
+  SettlementBindingNotPersistedError,
   SettlementEvidenceMismatchError,
+  SettlementFailedError,
+  SettlementInProgressError,
   proofHash,
   type GateOrder,
   type GateOrderStore,
@@ -362,5 +365,293 @@ describe("the unpaid path is unchanged", () => {
       PaymentRequiredError,
     );
     expect(runs).toBe(0);
+  });
+});
+
+/**
+ * Round 2 (cross-family review of the fix): the reviewer's F1/F4/F5 all route
+ * through the STORE and the TYPE of the presented proof rather than the settled
+ * branch itself, so each gets a test of its own.
+ */
+describe("a store write that carries no evidence must not unbind an order (F1)", () => {
+  test("MemoryOrderStore.put keeps a recorded digest and matches the sqlite store", () => {
+    const stores: [string, GateOrderStore][] = [
+      ["memory", new MemoryOrderStore()],
+      ["sqlite", new SqliteGateStore(join(mkdtempSync(join(tmpdir(), "unbind-")), "g.sqlite"))],
+    ];
+    for (const [name, store] of stores) {
+      const base: GateOrder = {
+        orderId: `u-${name}`,
+        tool: "t",
+        caller: "c",
+        amountSats: 1,
+        invoice: { orderId: `u-${name}`, paymentHash: "p", amountSats: 1, request: "r", pmi: "x" },
+        status: "awaiting_payment",
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      store.put(base);
+      expect(
+        store.claim(base.orderId, "awaiting_payment", "settlement_reserved", proofHash("token-A")),
+      ).toBe(true);
+      // A stale object (a pre-claim read, say) with no digest: the write must not
+      // wipe the binding, on either store.
+      store.put({ ...base, status: "settled", result: "paid-result" });
+      expect(store.get(base.orderId)!.proofHash).toBe(proofHash("token-A"));
+      if (store instanceof SqliteGateStore) store.close();
+    }
+  });
+
+  test("end to end: a settled row written without the digest cannot re-open the orderId-only replay", async () => {
+    const gate = new ExplicitGate(new ProofProcessor(["token-A"]));
+    const run = async () => "paid-result";
+    await gate.gate(call("s-1", "token-A", run));
+
+    // A second code path writes the settled row back WITHOUT the digest (a stale
+    // pre-claim object, a rollback handler, an admin script).
+    const store = (gate as unknown as { store: GateOrderStore }).store;
+    const settled = store.get("s-1")!;
+    expect(settled.proofHash).toBe(proofHash("token-A"));
+    store.put({ ...settled, proofHash: undefined, updatedAt: Date.now() });
+
+    // The binding survived the unbound write, so the hole stays closed.
+    expect(store.get("s-1")!.proofHash).toBe(proofHash("token-A"));
+    await expect(gate.gate(call("s-1", undefined, run))).rejects.toBeInstanceOf(
+      SettlementEvidenceMismatchError,
+    );
+    await expect(gate.gate(call("s-1", "token-B", run))).rejects.toBeInstanceOf(
+      SettlementEvidenceMismatchError,
+    );
+  });
+});
+
+describe("a non-string proof is not evidence (F5)", () => {
+  test("a non-string proof never settles an order unbound", async () => {
+    // A processor that accepts ANY non-undefined proof, i.e. one that coerces the
+    // argument (a redeemer doing `redeem(String(proof))`). It is the only shape
+    // that can turn a non-string into a settled order, so the guard must hold
+    // against IT, not against a processor that already rejects unknown strings.
+    class CoercingProcessor implements PaymentProcessor {
+      readonly pmi = "bitcoin-cashu";
+      async createInvoice(a: { orderId: string; amountSats: number }): Promise<Invoice> {
+        return {
+          orderId: a.orderId,
+          paymentHash: `cashu:${a.orderId}`,
+          amountSats: a.amountSats,
+          request: `cashu:https://mint.example:${a.amountSats}`,
+          pmi: this.pmi,
+        };
+      }
+      async verify(_i: Invoice, proof?: string): Promise<boolean> {
+        return proof !== undefined;
+      }
+    }
+    const gate = new ExplicitGate(new CoercingProcessor());
+    let runs = 0;
+    const run = async () => {
+      runs++;
+      return "paid-result";
+    };
+    // 42 is a plausible JSON-RPC slip. It must NOT settle the order (which would
+    // leave it bound to nothing, hence replayable by orderId alone).
+    await expect(
+      gate.gate({ ...call("n-1", undefined, run), proof: 42 as unknown as string }),
+    ).rejects.toBeInstanceOf(PaymentRequiredError);
+    expect(runs).toBe(0);
+    // Pin WHY it did not settle: with the coercing processor a non-undefined
+    // proof is enough, so this order is unsettled only because the non-string was
+    // normalised away. It is not a settled no-proof order either.
+    await expect(
+      gate.gate({ ...call("n-1", undefined, run), proof: 42 as unknown as string }),
+    ).rejects.toBeInstanceOf(PaymentRequiredError);
+    await expect(gate.gate(call("n-1", undefined, run))).rejects.toBeInstanceOf(PaymentRequiredError);
+    expect(runs).toBe(0);
+  });
+
+  test("a non-string proof cannot satisfy a settled order's replay", async () => {
+    const gate = new ExplicitGate(new ProofProcessor(["token-A"]));
+    await gate.gate(call("n-2", "token-A", async () => "paid-result"));
+    await expect(
+      gate.gate({
+        ...call("n-2", undefined, async () => "paid-result"),
+        proof: 42 as unknown as string,
+      }),
+    ).rejects.toBeInstanceOf(SettlementEvidenceMismatchError);
+  });
+});
+
+/** A store that accepts every write but persists no digest - finding F4. */
+class LossyStore implements GateOrderStore {
+  private readonly m = new Map<string, GateOrder>();
+  get(id: string): GateOrder | undefined {
+    const o = this.m.get(id);
+    if (!o) return undefined;
+    const c = { ...o };
+    delete c.proofHash;
+    return c;
+  }
+  put(o: GateOrder): void {
+    const c = { ...o };
+    delete c.proofHash;
+    this.m.set(o.orderId, c);
+  }
+  claim(id: string, from: GateOrder["status"], to: GateOrder["status"]): boolean {
+    const cur = this.m.get(id);
+    if (!cur || cur.status !== from) return false;
+    this.m.set(id, { ...cur, status: to, updatedAt: Date.now() });
+    return true;
+  }
+}
+
+describe("a store that drops the digest fails closed (F4)", () => {
+  test("the gate refuses to hand back a result whose binding did not land", async () => {
+    const gate = new ExplicitGate(new ProofProcessor(["token-A"]), new LossyStore());
+    await expect(gate.gate(call("L-1", "token-A", async () => "paid-result"))).rejects.toBeInstanceOf(
+      SettlementBindingNotPersistedError,
+    );
+    // Fail-closed: even after the failed call, no replay shape collects the result.
+    await expect(gate.gate(call("L-1", "token-A", async () => "paid-result"))).rejects.toBeInstanceOf(
+      SettlementFailedError,
+    );
+  });
+});
+
+/**
+ * A redeeming processor whose `verify` parks every caller until two have
+ * arrived. `verify()` runs BEFORE the claim, so a claim race is only reachable
+ * with two callers inside `verify()` at the same time - which is what this makes
+ * deterministic instead of timing-dependent.
+ */
+class RendezvousProcessor implements PaymentProcessor {
+  readonly pmi = "bitcoin-cashu";
+  private parked = 0;
+  private release!: () => void;
+  private openGate = false;
+  private readonly gateState = new Promise<void>((r) => {
+    this.release = () => {
+      this.openGate = true;
+      r();
+    };
+  });
+  private bothArrived!: () => void;
+  private readonly both = new Promise<void>((r) => {
+    this.bothArrived = r;
+  });
+
+  async createInvoice(a: { orderId: string; amountSats: number }): Promise<Invoice> {
+    return {
+      orderId: a.orderId,
+      paymentHash: `cashu:${a.orderId}`,
+      amountSats: a.amountSats,
+      request: `cashu:https://mint.example:${a.amountSats}`,
+      pmi: this.pmi,
+    };
+  }
+
+  async verify(_i: Invoice, proof?: string): Promise<boolean> {
+    if (proof === undefined) return false;
+    this.parked++;
+    if (this.parked === 2) this.bothArrived();
+    await this.gateState;
+    return proof === "token-A";
+  }
+
+  /** Resolves once two callers are simultaneously inside `verify()`. */
+  get whenBothParked(): Promise<void> {
+    return this.openGate ? Promise.resolve() : this.both;
+  }
+
+  open(): void {
+    this.release();
+  }
+}
+
+describe("the legitimate retry still works (F2)", () => {
+  test("a retry with the same proof after a lost response returns the cached result", async () => {
+    const gate = new ExplicitGate(new ProofProcessor(["token-A"]));
+    let runs = 0;
+    const run = async () => {
+      runs++;
+      return "paid-result";
+    };
+    expect(await gate.gate(call("retry-1", "token-A", run))).toBe("paid-result");
+    // The response never reached the client (crash, network), so it retries the
+    // same call verbatim: same result, action not re-run, payment not re-taken.
+    expect(await gate.gate(call("retry-1", "token-A", run))).toBe("paid-result");
+    expect(runs).toBe(1);
+  });
+
+  test("characterisation: a re-serialised proof is NOT the same evidence (accepted boundary)", async () => {
+    // The same underlying payment re-encoded (a Cashu v3<->v4 token re-write, a
+    // wallet that re-serialises on retry) is a DIFFERENT string, hence a
+    // different digest, hence refused. This is the accepted false positive of
+    // binding on the proof the processor was handed: the alternative - trusting
+    // `orderId` alone - is the hole this card closes. Closing it properly needs a
+    // processor-supplied stable `evidenceKey` (the token's secret set, not its
+    // serialisation), an interface change recorded as a residual gap, not a
+    // gate-side guess.
+    const gate = new ExplicitGate(new ProofProcessor(["token-A", "token-A-v4"]));
+    await gate.gate(call("enc-1", "token-A", async () => "paid-result"));
+    await expect(
+      gate.gate(call("enc-1", "token-A-v4", async () => "paid-result")),
+    ).rejects.toBeInstanceOf(SettlementEvidenceMismatchError);
+  });
+});
+
+describe("a claim-race loser is not stranded (F3)", () => {
+  test("the loser is told in_progress and its own proof still collects the result", async () => {
+    const processor = new RendezvousProcessor();
+    const gate = new ExplicitGate(processor);
+    let runs = 0;
+    const run = async () => {
+      runs++;
+      return "paid-result";
+    };
+    // Two concurrent first-calls for one order, both paying with the same token
+    // (a client that retried because the first response was slow, say).
+    const first = gate.gate(call("race-1", "token-A", run));
+    const second = gate.gate(call("race-1", "token-A", run));
+    await processor.whenBothParked; // both are inside verify(): the race is real
+    processor.open();
+
+    const settled = await Promise.allSettled([first, second]);
+    expect(settled.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(settled.filter((r) => r.status === "rejected")).toHaveLength(1);
+    const loser = settled.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(loser.reason).toBeInstanceOf(SettlementInProgressError);
+    // Exactly one action for one payment.
+    expect(runs).toBe(1);
+    // And the loser is not stranded: the proof that paid collects the cached
+    // result once the winner has settled.
+    expect(await gate.gate(call("race-1", "token-A", run))).toBe("paid-result");
+    expect(runs).toBe(1);
+  });
+});
+
+describe("the refusal does not reveal how the order was settled (F6)", () => {
+  test("every mismatch shape reports the same stable reason", async () => {
+    const proofSettled = new ExplicitGate(new ProofProcessor(["token-A"]));
+    await proofSettled.gate(call("f6-a", "token-A", async () => "r"));
+    const noProofSettled = new ExplicitGate(new PollingProcessor());
+    await noProofSettled.gate(call("f6-b", undefined, async () => "r"));
+
+    const cases: [ExplicitGate, string, string | undefined][] = [
+      [proofSettled, "f6-a", undefined], // presented nothing to a proof-settled order
+      [proofSettled, "f6-a", "token-B"], // presented a different proof
+      [noProofSettled, "f6-b", "token-C"], // presented a proof to a no-proof order
+    ];
+    const reasons = new Set<string>();
+    for (const [gate, orderId, proof] of cases) {
+      try {
+        await gate.gate(call(orderId, proof, async () => "r"));
+        throw new Error("expected the replay to be refused");
+      } catch (err) {
+        expect(err).toBeInstanceOf(SettlementEvidenceMismatchError);
+        reasons.add((err as SettlementEvidenceMismatchError).reason);
+      }
+    }
+    // One reason, so a caller who presented nothing cannot learn whether a
+    // guessed orderId was settled with a client proof.
+    expect([...reasons]).toEqual(["settlement_evidence_mismatch"]);
   });
 });
