@@ -195,17 +195,30 @@ both tables; no new support npub was introduced.
    this card is explicitly a *prerequisite* for. Consequence, stated plainly:
    **on today's live request path no terminal-failure escalation fires**, because the
    paid path does not yet run through `FiatSettlementMachine`. The machine is built,
-   armed at boot, durable and tested — it is simply not yet the gate for `card.balance`.
-   Follow-up card: *"Substitute FiatSettlementMachine for ExplicitGate on the
-   cvm-2fiat paid path"* (created by this run, parented to `t_89dcb160`).
-2. **No CI evidence for this repo, for any commit** — measured, not assumed:
-   `ngit_ci_evidence.py cvm-service-kit --commit <sha>` returns *"no kind-9842 CI
-   results found"* for `4c5a6fa`, for the base `b35b916`, for `1aa4be2` and for the
-   merged `main` commit `feb3358` alike (418 events scanned). GitHub Actions does run
-   for this repo, but **only on `push` to `main` and on `pull_request`** — hence the
-   branch is pushed to GitHub and a PR is opened so the real `ci` workflow
-   (`bun install --frozen-lockfile` + `bun run typecheck` + `bun run test`, and the
-   Deno job) reports a live result for exactly this head.
+   machine is built, armed at boot, durable and tested — it is simply not yet the gate for
+   `card.balance`. **No duplicate follow-up card was created for this**: card **`t_bd0f57a8`**
+   (*"Order API: BOLT11 invoice + sats settlement"*, already `ready`) is explicitly ordered to
+   be built **on this machine and not on `ExplicitGate`** ("Do t_e19ad2e9 … and t_89dcb160 …
+   FIRST, then this"), so the consumption of `FiatSettlementMachine` belongs to that card.
+   A comment on `t_bd0f57a8` records the delivered surface it must consume. Note also that
+   `cvm-2fiat` is a **rail-only** service (`card.balance` is an owner-only *read*, not a fiat
+   spend), so the escalation's value on its own paid path is low — the manager may decide to
+   leave `ExplicitGate` there rather than substitute it.
+2. **No CI evidence for this repo — and this is a known, already-carded board condition.**
+   Measured, not assumed: `ngit_ci_evidence.py cvm-service-kit --commit <sha>` returns
+   *"no kind-9842 CI results found"* for `4c5a6fa`, for the base `b35b916`, for `1aa4be2`
+   and for the merged `main` commit `feb3358` alike (418 events scanned). The repo's ngit
+   CI lane is **not wired** — that is card **`t_3c048cb9`** (*"cvm-service-kit: wire the
+   ngit-CI lane … register the repo with the hermes-nvme coordinator"*, status `blocked`).
+   GitHub Actions does run for this repo, but the workflow triggers only on `push` to
+   `main` and on `pull_request` — so the branch was pushed to GitHub and **PR #14** was
+   opened for it. **Measured after opening and again after close/reopen: GitHub created
+   no workflow run for this head** (`gh api …/commits/ab1a6ab…/check-runs` →
+   `total_count: 0`; `gh run list --branch worker-base/t_89dcb160` → empty). So the
+   verbatim absence is:
+   `no CI evidence available (reason: ngit CI lane not wired for cvm-service-kit — t_3c048cb9; GitHub Actions produced no run for PR #14 head ab1a6ab)`.
+   Local equivalents that *were* run and are attached: `bun test src services`
+   (216 pass / 1 skip / 0 fail) and `bun run typecheck` (exit 0).
 3. **Reviewer-lane availability was measured at handoff time**, not assumed:
    `tier/review-glm` → `glm-5.3` and `tier/review-kimi` → `kimi-k3` both returned
    HTTP 503 *"all providers exhausted (flat router)"*; `tier/review-qwen` →
