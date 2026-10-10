@@ -215,7 +215,7 @@ describe("replies are durable-state inputs", () => {
     });
     const m = machine({ escalations, intents, sink });
     await m.raise({ intentId: "i-esc-5", kind: "fiat_action_failed", payload: PAYLOAD });
-    const rec = await m.applyReply({ intentId: "i-esc-5", text: "refunded, sorry about that" });
+    const rec = await m.applyReply({ intentId: "i-esc-5", text: "refunded, sorry about that", from: OPERATOR });
     expect(rec!.state).toBe("resolved");
     expect(rec!.resolution).toBe("refunded");
     expect(intents.get("i-esc-5")!.status).toBe("refunded");
@@ -237,12 +237,63 @@ describe("replies are durable-state inputs", () => {
     const m = machine({ escalations, intents, sink });
     await m.raise({ intentId: "i-esc-6", kind: "fiat_action_failed", payload: PAYLOAD });
     for (const text of ["retry it", "paid", "settled", "go ahead", "ok", "", "please charge again"]) {
-      const rec = await m.applyReply({ intentId: "i-esc-6", text });
+      const rec = await m.applyReply({ intentId: "i-esc-6", text, from: OPERATOR });
       expect(intents.get("i-esc-6")!.status).toBe("settlement_failed");
       expect(rec!.state).not.toBe("resolved");
     }
     // a captured/replayed refund reply from a non-refund intent cannot resurrect it
     expect(intents.get("i-esc-6")!.status).toBe("settlement_failed");
+    escalations.close();
+    intents.close();
+  }, T);
+
+  test("an UNAUTHORIZED reply is recorded but changes nothing (a customer cannot resolve their own escalation)", async () => {
+    const { escalations, intents } = mkStores();
+    const sink = new FakeSink();
+    intents.create({
+      intentId: "i-esc-auth",
+      ...BINDING,
+      status: "settlement_failed",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const m = machine({ escalations, intents, sink, customer: CUSTOMER });
+    await m.raise({
+      intentId: "i-esc-auth",
+      kind: "fiat_action_failed",
+      payload: PAYLOAD,
+      customer: CUSTOMER,
+    });
+
+    const rec = await m.applyReply({ intentId: "i-esc-auth", text: "refunded", from: CUSTOMER });
+    // recorded for the audit trail, but inert: the intent stays failed and the
+    // escalation stays visible to the operator (sweep still alerts on it)
+    expect(rec!.replies.length).toBe(1);
+    expect(rec!.replies[0]!.from).toBe(CUSTOMER);
+    expect(rec!.state).toBe("notified");
+    expect(rec!.resolution).toBeUndefined();
+    expect(intents.get("i-esc-auth")!.status).toBe("settlement_failed");
+
+    // ... and the operator's own reply still works
+    const ok = await m.applyReply({ intentId: "i-esc-auth", text: "refunded", from: OPERATOR });
+    expect(ok!.state).toBe("resolved");
+    expect(intents.get("i-esc-auth")!.status).toBe("refunded");
+    escalations.close();
+    intents.close();
+  }, T);
+
+  test("the operator is never used as its own customer thread", async () => {
+    const { escalations, intents } = mkStores();
+    const sink = new FakeSink();
+    const m = machine({ escalations, intents, sink });
+    const rec = await m.raise({
+      intentId: "i-esc-self",
+      kind: "fiat_action_failed",
+      payload: PAYLOAD,
+      customer: OPERATOR,
+    });
+    expect(rec.customer).toBeUndefined();
+    expect(sink.sent.map((d) => d.to)).toEqual([OPERATOR]); // one DM, not two
     escalations.close();
     intents.close();
   }, T);
@@ -259,7 +310,7 @@ describe("replies are durable-state inputs", () => {
     });
     const m = machine({ escalations, intents, sink });
     await m.raise({ intentId: "i-esc-7", kind: "duplicate_attempt", payload: PAYLOAD });
-    await m.applyReply({ intentId: "i-esc-7", text: "refunded" });
+    await m.applyReply({ intentId: "i-esc-7", text: "refunded", from: OPERATOR });
     expect(intents.get("i-esc-7")!.status).toBe("settled");
     escalations.close();
     intents.close();
@@ -300,7 +351,7 @@ describe("bounded window", () => {
     });
     const m = machine({ escalations, intents, sink, now: () => now });
     await m.raise({ intentId: "i-esc-9", kind: "fiat_action_failed", payload: PAYLOAD });
-    await m.applyReply({ intentId: "i-esc-9", text: "refunded" });
+    await m.applyReply({ intentId: "i-esc-9", text: "refunded", from: OPERATOR });
     now += 10 * DEFAULT_ESCALATION_WINDOW_SECONDS * 1000;
     expect(await m.sweep()).toEqual([]);
     escalations.close();

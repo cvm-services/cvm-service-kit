@@ -44,7 +44,7 @@ export interface EscalationRecord {
   /** Optional customer thread, subordinate to the operator DM. */
   customer?: string;
   payload: EscalationPayload;
-  replies: Array<{ text: string; at: number }>;
+  replies: Array<{ text: string; at: number; from?: string }>;
   windowSeconds: number;
   notifiedAt?: number;
   alertedAt?: number;
@@ -218,11 +218,17 @@ export class EscalationMachine {
    * Raise (or re-fetch) the escalation for an intent. At most ONE DM per
    * (intent, kind) is ever sent: the durable row is written first and is what
    * later calls see. A DM is never the barrier for anything.
+   *
+   * `customer` overrides the machine-level default for this one escalation: the
+   * payer of THIS intent, which is not a constant of the service. The operator
+   * is never used as the customer thread (an operator DM to themselves would be
+   * noise, and it cannot signal anything the operator DM does not already).
    */
   async raise(args: {
     intentId: string;
     kind: EscalationKind;
     payload: EscalationPayload;
+    customer?: string;
   }): Promise<EscalationRecord> {
     assertNoCardMaterial(JSON.stringify(args.payload));
     const escalationId = `${args.intentId}:${args.kind}`;
@@ -230,13 +236,14 @@ export class EscalationMachine {
     if (existing) return existing; // durable dedupe: no second DM, ever
 
     const t = this.now();
+    const customer = args.customer ?? this.o.customer;
     const rec: EscalationRecord = {
       escalationId,
       intentId: args.intentId,
       kind: args.kind,
       state: "open",
       operator: this.o.operator,
-      customer: this.o.customer,
+      customer: customer && customer !== this.o.operator ? customer : undefined,
       payload: args.payload,
       replies: [],
       windowSeconds: this.o.windowSeconds ?? DEFAULT_ESCALATION_WINDOW_SECONDS,
@@ -275,16 +282,28 @@ export class EscalationMachine {
    * A DM reply is an INPUT that updates durable state. It can only ever move an
    * intent to a TERMINAL state - no reply text can re-arm an intent, so a
    * captured/replayed reply is inert.
+   *
+   * `from` is the pubkey the reply actually came from and is REQUIRED, because
+   * the amendment authorises the OWNER/support contact's replies specifically.
+   * Without the check, the CUSTOMER could resolve their own failed payment:
+   * "refunded" would flip the intent terminal and move the escalation out of
+   * the sweep, so the operator would never be alerted. An unauthorized reply is
+   * still RECORDED (audit) but changes nothing.
    */
-  async applyReply(args: { intentId: string; text: string }): Promise<EscalationRecord | undefined> {
+  async applyReply(args: {
+    intentId: string;
+    text: string;
+    from: string;
+  }): Promise<EscalationRecord | undefined> {
     const recs = this.o.store.byIntent(args.intentId);
     if (recs.length === 0) return undefined;
     const rec = recs[recs.length - 1];
-    rec.replies.push({ text: args.text, at: this.now() });
+    const authorized = !!args.from && args.from === rec.operator;
+    rec.replies.push({ text: args.text, at: this.now(), from: args.from });
     rec.updatedAt = this.now();
 
     const refunded = /\brefund(ed|ing)?\b/i.test(args.text);
-    if (refunded && this.o.intents) {
+    if (refunded && authorized && this.o.intents) {
       const intent = this.o.intents.get(args.intentId);
       if (intent && intent.status !== "settled") {
         // Terminal only. Never back to awaiting_payment / settled_reserved.
