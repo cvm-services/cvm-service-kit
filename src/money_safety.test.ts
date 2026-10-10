@@ -22,6 +22,7 @@ import {
   SettlementFailedError,
   type GateOrder,
   type GateOrderStatus,
+  type GateOrderStore,
   type Invoice,
   type PaymentProcessor,
 } from "./payment.ts";
@@ -158,6 +159,38 @@ describe("ExplicitGate money safety", () => {
     expect((err as GateOrderStateError).status).toBe("paid");
     expect(runs).toBe(0);
   });
+
+  test("a void tool (run() returns undefined) still replays from the cache", async () => {
+    // The replay guard must key on the order STATUS, not on `result !== undefined`.
+    // A void tool legitimately returns `undefined`; if the guard tested the result,
+    // such a settled order would fall through every status guard and call
+    // `run()` again against the same payment - the original double spend, back
+    // for that tool shape. Both stores are exercised: `SqliteGateStore` stores a
+    // missing result as SQL NULL and reads it back as `undefined`, so a
+    // result-keyed guard fails there too.
+    const stores: Array<[string, GateOrderStore]> = [
+      ["memory", new MemoryOrderStore()],
+      ["sqlite", (() => {
+        const { store } = mkStore();
+        return store;
+      })()],
+    ];
+
+    for (const [kind, store] of stores) {
+      const processor = new FakeProcessor();
+      processor.paid = true;
+      const gate = new ExplicitGate(processor, store);
+      let runs = 0;
+      const voidRun = async () => {
+        runs++;
+        return undefined;
+      };
+
+      expect(await gate.gate(req(`void-${kind}`, voidRun))).toBeUndefined();
+      expect(await gate.gate(req(`void-${kind}`, voidRun))).toBeUndefined();
+      expect(runs).toBe(1);
+    }
+  }, SLOW);
 
   test("concurrent calls run the tool exactly once", async () => {
     const processor = new FakeProcessor();
