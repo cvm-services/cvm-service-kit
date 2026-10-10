@@ -72,6 +72,24 @@ export class SettlementFailedError extends Error {
   }
 }
 
+/**
+ * The order is in a state this build cannot safely act on: a status it does not
+ * recognise, or a legacy `paid` row written by the pre-2026-10-09 code BEFORE
+ * the action ran (so whether the action ran is unknowable).
+ *
+ * Distinct from SettlementFailedError on purpose: nothing here says the action
+ * failed, only that running it again could spend the same payment twice. Fail
+ * closed, and keep the two states distinguishable for the settlement state
+ * machine built on top of this gate.
+ */
+export class GateOrderStateError extends Error {
+  readonly code = -32005;
+  constructor(readonly orderId: string, readonly status: string, readonly detail: string) {
+    super(`order_state_unverifiable: status=${status}: ${detail}`);
+    this.name = "GateOrderStateError";
+  }
+}
+
 export function parseCapTags(tags: string[][]): Cap[] {
   const caps: Cap[] = [];
   for (const t of tags) {
@@ -179,55 +197,90 @@ export class ExplicitGate {
       return order.result as T;
     }
 
-    // A terminal failure stays terminal. The sats were taken and the downstream
-    // action failed; re-running it would spend the same payment twice.
-    if (order.status === "settlement_failed") {
-      throw new SettlementFailedError(order.orderId, order.failure?.message ?? "unknown");
+    // Every other status is decided HERE, and only `awaiting_payment` reaches the
+    // action below. Written as an exhaustive switch with an explicit `default`
+    // because the previous shape enumerated three statuses and let everything
+    // else - a `refused` order, or any status written by a different build -
+    // FALL THROUGH to `args.run()`: an unverified order would have executed the
+    // downstream action with no payment check and no claim. A status this build
+    // does not recognise must deny, never run.
+    switch (order.status) {
+      case "awaiting_payment":
+        break;
+      case "settlement_reserved":
+        // Another caller already holds the settlement claim for this payment.
+        throw new SettlementInProgressError(order.orderId);
+      case "settlement_failed":
+        // Terminal: the sats were taken and the action failed. Re-running would
+        // spend the same payment twice, so a retry re-throws the recorded reason.
+        // A store that keeps the row but drops `failure` yields "unknown" here.
+        throw new SettlementFailedError(order.orderId, order.failure?.message ?? "unknown");
+      case "paid":
+        // Written by the pre-2026-10-09 code BEFORE the action ran. Whether the
+        // action ran is unknowable, so refuse rather than risk a second attempt -
+        // and do not call it a settlement failure it may never have had.
+        throw new GateOrderStateError(
+          order.orderId,
+          order.status,
+          "legacy row written before the action ran: settlement outcome unknown",
+        );
+      case "refused":
+        throw new GateOrderStateError(
+          order.orderId,
+          order.status,
+          "order is refused; the action must not run",
+        );
+      default:
+        throw new GateOrderStateError(
+          order.orderId,
+          String(order.status),
+          "unrecognised order status; refusing to run",
+        );
     }
 
-    // Rows written by the pre-fix code ("paid" was persisted BEFORE the action
-    // ran) have an unverifiable outcome. Never re-run them; escalate instead.
-    if (order.status === "paid") {
-      throw new SettlementFailedError(order.orderId, "legacy paid row: settlement outcome unknown");
+    const paid = await this.processor.verify(order.invoice, args.proof);
+    if (!paid) {
+      throw new PaymentRequiredError("payment_required", {
+        orderId: order.orderId,
+        invoice: order.invoice.request,
+        amountSats: order.amountSats,
+        paymentHash: order.invoice.paymentHash,
+        pmi: order.invoice.pmi,
+      });
     }
-
-    // Another caller already holds the settlement claim for this payment.
-    if (order.status === "settlement_reserved") {
-      throw new SettlementInProgressError(order.orderId);
-    }
-
-    if (order.status === "awaiting_payment") {
-      const paid = await this.processor.verify(order.invoice, args.proof);
-      if (!paid) {
-        throw new PaymentRequiredError("payment_required", {
-          orderId: order.orderId,
-          invoice: order.invoice.request,
-          amountSats: order.amountSats,
-          paymentHash: order.invoice.paymentHash,
-          pmi: order.invoice.pmi,
-        });
-      }
-      // Claim the right to settle exactly once. The loser must NOT run the action:
-      // that is how one sats payment became two fiat attempts before this fix.
-      const won = this.store.claim(order.orderId, "awaiting_payment", "settlement_reserved");
-      if (!won) throw new SettlementInProgressError(order.orderId);
-    }
+    // Claim the right to settle exactly once. The loser must NOT run the action:
+    // that is how one sats payment became two fiat attempts before this fix.
+    const won = this.store.claim(order.orderId, "awaiting_payment", "settlement_reserved");
+    if (!won) throw new SettlementInProgressError(order.orderId);
 
     try {
       const result = await args.run();
-      const done = this.store.get(order.orderId) ?? order;
-      done.status = "settled";
-      done.result = result;
-      done.updatedAt = Date.now();
-      this.store.put(done);
+      try {
+        const done = this.store.get(order.orderId) ?? order;
+        done.status = "settled";
+        done.result = result;
+        done.updatedAt = Date.now();
+        this.store.put(done);
+      } catch {
+        // The action RAN and succeeded; only recording it failed (a locked store).
+        // Never mask a completed action behind a storage error: the row is still
+        // `settlement_reserved`, so the worst case is a replay that reports
+        // "in progress" - never a second run of the action.
+      }
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const failed = this.store.get(order.orderId) ?? order;
-      failed.status = "settlement_failed";
-      failed.failure = { message, at: Date.now() };
-      failed.updatedAt = Date.now();
-      this.store.put(failed);
+      try {
+        const failed = this.store.get(order.orderId) ?? order;
+        failed.status = "settlement_failed";
+        failed.failure = { message, at: Date.now() };
+        failed.updatedAt = Date.now();
+        this.store.put(failed);
+      } catch {
+        // Same reasoning: the terminal write failed, so the row stays
+        // `settlement_reserved` and a retry throws SettlementInProgressError
+        // instead of re-running. Fail closed, and never swallow the real error.
+      }
       throw err;
     }
   }
