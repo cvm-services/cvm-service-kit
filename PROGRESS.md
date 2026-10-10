@@ -170,3 +170,24 @@ Two of the three were real defects in round 2's work; all are fixed or conceded.
   0 fail; `bun run typecheck` rc=0; `deno task check` rc=0; `deno task test` 24 passed/0 failed.
 - round-3 mutation: evidence/replay_proof_binding.mutation_round3.txt - M1..M7 all caught, source
   restored byte-identical. This supersedes the round-2 transcript (M1-M4 same, M5-M7 new).
+
+## Round 4 (cross-family re-review of the R3-1 delta) - done
+- r3 review (chutes moonshotai/Kimi-K3-TEE, reviewed cd1225f): APPROVE + 1 non-blocking finding
+  R3-1 (only `settled` was pinned; deleting a single entry from either terminal-status list
+  survived the suite). Accepted and closed: c41b528 parameterises the reuse test over all four
+  statuses on both stores (settled/settlement_failed via the REAL gate path), docs both sites.
+- r4 review (same lane, head c41b528): APPROVE + F4-1 (minor) + F4-2 (nit).
+  F4-1 was RIGHT and about my own prose: the comment claimed the test loops over TERMINAL_STATUSES;
+  it looped over a local mirror, so an ADDED entry stayed unpinned. Fixed in the strong direction
+  in 0b9c4a7: TERMINAL_STATUSES is exported, the sqlite CASE IN-list is interpolated from it (the
+  two stores can no longer drift), the explicit mirror stays (pins deletions) plus a set-equality
+  assertion against the exported list (pins additions).
+  F4-2: the mutation transcript header named the committed HEAD while its baseline was the dirty
+  tree; regenerated so the header prints the commit AND the working-tree status.
+- round-4 green: 27/27 src/replay_binding.test.ts (145 expect); `bun run test` 248 pass / 1 skip /
+  0 fail (249 tests); `bun run typecheck` rc=0; `deno task check` rc=0; `deno check
+  src/payment.ts src/gate-store.ts` rc=0; `deno task test` 24 passed/0 failed.
+- round-4 mutation: evidence/replay_proof_binding.mutation_round4.txt - M8..M12 caught;
+  M13 (equality assertion deleted first, then settle_failed removed) also caught -> proves the
+  behavioural loop has teeth on its own; source restored byte-identical.
+- report: REPORT-t_5b30bdec.md sections 7 (all four rounds), 12, 13 updated.

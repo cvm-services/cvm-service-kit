@@ -180,6 +180,20 @@ router's `kimi-k3`/`glm-5.3` are served by DeepSeek and satisfy no cross-family 
 head `f8cbe15`, verdict **REQUEST_CHANGES, 7 findings**:
 `~/reports/reviews/contextvm-services-t_5b30bdec-Kimi-K3-TEE-review.md`.
 
+All four rounds are the same family (`moonshotai/Kimi-K3-TEE`, served by chutes/llm.chutes.ai —
+`response_model` read back from the API response, never the model's self-reported line), all on the
+same lane, each reviewing the previous round's head:
+
+| round | reviewed head | verdict | findings |
+|---|---|---|---|
+| r1 | `f8cbe15` | REQUEST_CHANGES | 7 (F1–F7) → §8 |
+| r2 | `f59412f` | REQUEST_CHANGES | 3 (R2-1…R2-3) → §10 |
+| r3 | `2829a37` / `cd1225f` | **APPROVE** | 1 non-blocking (R3-1) → §12 |
+| r4 | `c41b528` | **APPROVE** | 2 non-blocking (F4-1 minor, F4-2 nit) → §12 |
+
+Every round-1/2/3/4 artifact is in `~/reports/reviews/`, with the round-4 one additionally
+stamped with `prompt_sha256` so the reviewed text is bound to the artifact.
+
 ## 8. Round 2 — adjudication of the 7 findings
 
 Every finding was checked against the code before it was answered. Four produced changes; the
@@ -365,4 +379,102 @@ and judged genuinely non-vacuous (including the F5 coercing-processor rewrite).
 Raw transcript: `evidence/replay_proof_binding.mutation_round3.txt` (supersedes the round-2
 transcript; M1–M4 are the same mutants, M5–M7 are the three the round-2 review found uncovered).
 
+## 12. Round 4 — R3-1, the F4-1 correction, and the round-4 verdict
 
+**Round 3's verdict on `cd1225f` was APPROVE** with one non-blocking finding, **R3-1**: the R2-3
+test exercised only `settled` out of the four `TERMINAL_STATUSES` entries, so a mutant deleting a
+**single** entry from either list (memory `TERMINAL_STATUSES`, sqlite `IN (...)`) passed the whole
+suite. The reviewer named `settlement_failed` as the load-bearing entry: the claim records the
+digest at `settlement_reserved`, so a row whose action then threw sits at `settlement_failed`
+**carrying** the payer's digest — reusing that orderId without the list entry re-opens R2-3
+exactly (the new payer is refused, the old proof holder collects the new order's result).
+`~/reports/reviews/contextvm-services-t_5b30bdec-Kimi-K3-TEE-review-r3.md`
+
+**First fix (`c41b528`).** Accepted — by this card's own mutation-pinning standard an unpinned
+load-bearing entry is a gap — and closed rather than deferred:
+
+- `src/replay_binding.test.ts` — the reuse test is parameterised over **all four** terminal
+  statuses on **both** bundled stores. `settled` and `settlement_failed` are reached through the
+  **real gate path**, so the test also proves that a `settlement_failed` row really does carry a
+  digest in practice (the item round 3 listed under COULD_NOT_VERIFY); `refused`/`paid` are
+  constructed directly as the defensive worst case. Every iteration asserts the precondition
+  (`terminal.proofHash === H(token-A)`), then that the reused orderId settles with *its own* (here
+  absent) evidence, that its own payer collects it, and that generation 1's proof is refused.
+- `src/payment.ts` / `src/gate-store.ts` — the deny-list hazard round 3 raised as a nit is
+  documented at both sites (a future terminal status missing from either list fails *toward* the
+  old bug).
+
+**Round 4's verdict: APPROVE** (`...-Kimi-K3-TEE-review-r4.md`, `moonshotai/Kimi-K3-TEE`, chutes
+direct, reviewed head `c41b528`), with two findings — one of them **right, and about my own
+prose**:
+
+- **F4-1 (minor) — the claim was false as written.** The comment said
+  "`replay_binding.test.ts` pins every entry by looping over this list". It did not: it looped over
+  its **own local mirror**, so an entry *added* to `TERMINAL_STATUSES` without being mirrored
+  would stay silently unpinned — **R3-1 recreated for the next status**. Deletions *were* pinned.
+  This is the reviewer catching an overclaim in my adjudication, not in the code, and it is fixed
+  in the **strong** direction rather than by rewording:
+  - `src/payment.ts` — `TERMINAL_STATUSES` is **exported** (one source of truth).
+  - `src/gate-store.ts` — the sqlite `CASE` `IN (...)` list is **interpolated from that constant**,
+    so the two bundled stores cannot drift apart at all (`TERMINAL_STATUS_SQL`); the previous
+    instruction "change both lists together" is now structurally unnecessary.
+  - `src/replay_binding.test.ts` — the **explicit mirror stays** (it is what pins *deletions*: a
+    loop over the production list would silently shrink instead of failing), **plus** a
+    set-equality assertion against the exported list that pins *additions*. Both directions now
+    fail loudly, and the comments at all three sites say exactly that.
+- **F4-2 (nit) — the mutation transcript's header named the committed HEAD while its baseline was
+  the dirty working tree.** Correct, and it is the same unparameterised-header defect the author
+  had disclosed for rounds 1–3: the transcript printed `git rev-parse HEAD` (`cd1225f`) although
+  the tree under test was `cd1225f` **+ the uncommitted round-3 delta**. Regenerated: the header
+  now prints the commit **and** the working-tree status line, so the reader can never be misled
+  about which tree produced the numbers.
+
+**Round-4 mutation evidence** (`evidence/replay_proof_binding.mutation_round4.txt`) — after F4-1
+there is ONE list to mutate, `bun test src/replay_binding.test.ts`:
+
+| mutant | change | result |
+|---|---|---|
+| M8 | list loses `settlement_failed` | 2 fail — caught |
+| M9 | list loses `refused` | 2 fail — caught |
+| M10 | list loses `paid` | 2 fail — caught |
+| M11 | list loses `settled` | 3 fail — caught (also the R2-3 test) |
+| M12 | list **gains** `expired` (F4-1's direction) | 1 fail — caught by the equality assertion |
+| M13 | equality test deleted **and** `settlement_failed` removed | 1 fail — caught by the behavioural loop alone |
+
+M8–M11 each trip both the behavioural loop and the equality assertion; **M13 exists to show that
+is not double-counting** — with the equality assertion removed first, the behavioural loop still
+catches the deletion on its own. Source restored **byte-identical** (sha256 of both source files
+compared before/after inside the transcript).
+
+**Round-4 answers worth recording** (the reviewer's questions 1–5, condensed): R3-1 is closed —
+all 8 (status × store) pins exist, traced through the exact mutation path, and 4 of the 8 possible
+single-entry mutants were run (the other four fail by the identical assertion path); the
+parameterised test is **non-vacuous where it matters**, because the `settled`/`settlement_failed`
+preconditions assert what production persisted rather than what the test constructed; the
+precondition holds on the real path because `settlement_reserved → settlement_failed` is not a
+generation reset on either store and both preserve an existing digest on any digest-less write;
+and **no new defect** was found — the production diff at that head was comment-only.
+
+**Honest scope note.** R3-1 was non-blocking and round 3's verdict was APPROVE, so the `c41b528`
+delta was not required for the shipped logic to be correct — only for the *pinning claim* to be
+true. F4-1 then showed the claim was still overstated, and the `0b9c4a7` fix removes the
+possibility rather than the sentence. Rounds 1–3 artifacts still carry a hardcoded
+`reviewed head: f8cbe15` header field (harness defect); their **content** corresponds to
+`f8cbe15`, `2829a37` and `cd1225f` respectively, and the round-4 harness takes the head as an
+argument and stamps a `prompt_sha256`.
+
+## 13. Round 4 — verification (re-executed)
+
+| item | result |
+|---|---|
+| `bun test src/replay_binding.test.ts` | **27 pass / 0 fail** (145 `expect()` calls) |
+| `bun run test` | **248 pass / 1 skip / 0 fail** (249 tests / 36 files) |
+| `bun run typecheck` | `tsc --noEmit` exit **0** |
+| `deno task check` | exit **0** |
+| `deno check src/payment.ts src/gate-store.ts` | exit **0** (they are NOT in `deno.json`'s `mod.ts` graph) |
+| `deno task test` | **24 passed / 0 failed** |
+| mutations M8–M13 | all caught (M8–M10 → 2 fail, M11 → 3, M12/M13 → 1) |
+| source restored byte-identical after mutation | yes |
+
+Raw transcript: `evidence/replay_proof_binding.suite_round4.txt`. Committed and pushed to
+**both** remotes as `c41b528` (R3-1) and `0b9c4a7` (F4-1); each was read back with `git ls-remote`.
