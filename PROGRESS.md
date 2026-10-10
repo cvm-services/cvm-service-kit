@@ -24,7 +24,15 @@
 - deno scope: `deno task check` only checks src/mod.ts, which does NOT re-export payment.ts or
   gate-store.ts -> checked them explicitly (rc=0) WITH a negative control proving deno reports
   errors there (TS2322) | evidence/deno_scope.txt
-- commit b4ecf58; pushed github fix/gate-money-safety (PR #13); pushed ngit
+- commit b4ecf58 + e8508b9; pushed github fix/gate-money-safety (PR #13, comment 6093496026) and ngit
+  (refs/heads/fix/gate-money-safety = e8508b9, read back via ls-remote). GitHub Actions CI green on
+  e8508b9 (run 38022113139, jobs bun+deno pass).
+- gate: tier=code, cleared tests_green/pushed_or_consolidated/consolidated/secrets_clean/
+  review_published. Still missing: ci_evidence (STRUCTURAL - gate reads ngit kind-9842 and this repo
+  emits none at any commit; it is GitHub-Actions-routed), no_live_drift (unrelated systemd/fleet
+  drift), pr_branch_naming (branch pre-dates the card as PR #13's head), cold_cross_family_review +
+  review_artifact (review lane's job -> card sent to review).
+- sent to review (no reviewer pinned: author is zai/tier/coding-worker, D-115 needs another family).
 - REPORT.md section "t_e19ad2e9 (2026-10-10)" at the top carries the full write-up.
 
 ---

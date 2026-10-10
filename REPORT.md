@@ -154,6 +154,33 @@ its own commit.
 
 ### Verification status: VERIFIED (bun 1.4.2 + deno 2.9.0, 2026-10-10)
 
+### Board gate status (code tier), and one reusable finding
+`gate_engine.py evaluate --board contextvm-services --task t_e19ad2e9` → `verdict=block`,
+`missing=['ci_evidence', 'cold_cross_family_review', 'review_artifact', 'pr_branch_naming',
+'no_live_drift']`. Cleared by this card's evidence: `tests_green`, `pushed_or_consolidated`,
+`consolidated`, `secrets_clean`, `review_published`. The five remaining, each with its reason:
+
+- **`ci_evidence` — structurally unsatisfiable for this repo.** The gate consumes *ngit* CI
+  (`ci_evidence_bin` → `ngit_ci_evidence.py`, kind-9842). Probed with and without `--commit`:
+  ```
+  no kind-9842 CI results found for repo=cvm-service-kit ...
+  ```
+  The repo has never emitted a kind-9842 result at any commit; its CI is GitHub-Actions-routed and
+  **green** on the head commit (workflow `ci`, run `38022113139`, `conclusion=success`, jobs `bun
+  pass` + `deno pass`). `cvm-service-kit` is not in `ci_exempt_repos`. This is precisely the
+  waiver-shaped case gate_engine's own source names ("ci_evidence tooling reads ngit while the repo
+  is GitHub-Actions-routed"), so it needs a waiver or an exempt-list entry — not a code change here.
+- **`no_live_drift`** — `~/.hermes/bot/repo_drift_state.json` lists `systemd/fleet-*`,
+  `systemd/hermes-state-sync.service` and `runtime:hermes-orchestration-primary`. Nothing from
+  `cvm-service-kit`; a fleet-side reconcile is required.
+- **`pr_branch_naming`** — the branch `fix/gate-money-safety` is not `pr/<slug>`, but it pre-dates
+  this card: it is PR #13's existing head. Renaming a live PR's branch is a lifecycle operation the
+  fleet has measured to **close** the open PR, so it was deliberately not done to satisfy the gate.
+- **`cold_cross_family_review` / `review_artifact`** — the review lane's outputs; the reason this
+  card is handed to review rather than completed. The author is `tier/coding-worker` (zai), so the
+  reviewer must come from a different family (D-115); no reviewer is pinned, so `reviewer_assign`
+  can exclude the author family itself.
+
 ## What this branch changes (b35b916, kept as written)
 `ExplicitGate` persisted `order.status = "paid"` BEFORE `await args.run()`. A failed run therefore
 left the order retryable, and the next call re-ran the tool: **two fiat attempts against a single
