@@ -80,6 +80,35 @@ export class SqliteGateStore implements GateOrderStore {
   close(): void {
     this.db.close();
   }
+  /**
+   * Insert-if-absent. `ON CONFLICT DO NOTHING` makes creation atomic across
+   * processes: when two control-plane workers both read "no such order" and both
+   * try to create it, exactly one INSERT lands and the other is a no-op - it must
+   * never overwrite a row its peer has already advanced to a terminal status.
+   * The caller continues from the row that is actually there, which is why the
+   * read-back below is part of the contract and not a convenience.
+   */
+  create(order: GateOrder): GateOrder {
+    this.db.run(
+      `INSERT INTO gate_orders (order_id, tool, caller, amount_sats, invoice_json,
+                                status, result_json, failure_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(order_id) DO NOTHING`,
+      [
+        order.orderId,
+        order.tool,
+        order.caller,
+        order.amountSats,
+        JSON.stringify(order.invoice),
+        order.status,
+        order.result === undefined ? null : JSON.stringify(order.result),
+        order.failure === undefined ? null : JSON.stringify(order.failure),
+        order.createdAt,
+        order.updatedAt,
+      ],
+    );
+    return this.get(order.orderId) ?? order;
+  }
 
   put(order: GateOrder): void {
     this.db.run(
