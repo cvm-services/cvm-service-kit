@@ -110,3 +110,8 @@ Runbook: `docs/gate-recovery-runbook.md`. Evidence: `evidence/recovery/`.
   commit on this branch; each now carries a named test or a correction - table F8.2
 - green: bun test src/gate-recovery.test.ts 6/6; bun run test 231 pass/1 skip/0 fail (37 files);
   bun run typecheck rc=0; deno task check + deno check <4 files> rc=0; CLI usage rc=2, list rc=0
+- pushed: github + ngit `fix/gate-consumer-audit` = `c27a2d6` (both read back via ls-remote); PR #17
+  opened (base `main` @ e2a7065), GitHub Actions run 38069241558 jobs bun+deno = pass,
+  MERGEABLE/CLEAN; PR #13 updated with a pointer (comment 6099902729) and the re-review request
+  posted on #17 (comment 6099903603). Re-review is still OUTSTANDING - the BLOCKED verdict on
+  PR #13 stands until a different-family reviewer clears #17, so this card goes to review.
