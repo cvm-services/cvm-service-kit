@@ -31,6 +31,7 @@ import {
   SettlementEvidenceMismatchError,
   SettlementFailedError,
   SettlementInProgressError,
+  TERMINAL_STATUSES,
   proofHash,
   type GateOrder,
   type GateOrderStatus,
@@ -746,19 +747,34 @@ describe("a reused orderId does not inherit the previous order's binding (R2-3)"
 
 describe("every terminal status that can carry a binding drops it on reuse (R3-1)", () => {
   /**
-   * Mirrors `TERMINAL_STATUSES` in src/payment.ts and the status list in
-   * `SqliteGateStore.put`'s CASE. The R2-3 test only exercised `settled`, so a
-   * mutant that deleted ONE entry (e.g. `settlement_failed`) from either list
-   * passed the whole suite - even though `settlement_failed` is the load-bearing
-   * entry: the claim records the digest at `settlement_reserved`, so a row whose
-   * action then threw sits at `settlement_failed` CARRYING the payer's digest.
+   * An EXPLICIT mirror of `TERMINAL_STATUSES` (src/payment.ts), one entry per
+   * status. The mirror is what gives the loop its teeth: it is written out here,
+   * not read from the module, so deleting an entry from the production list does
+   * NOT shrink this loop - it fails a behavioural assertion instead (M8-M11).
+   *
+   * The equality assertion below covers the other direction: an entry ADDED to
+   * the production list without being mirrored here would otherwise be silently
+   * unpinned, which is exactly the R3-1 gap recreated for the next status (F4-1
+   * of the round-4 review). Both directions fail loudly.
+   *
+   * `settlement_failed` is the load-bearing entry: the claim records the digest at
+   * `settlement_reserved`, so a row whose action then threw sits at
+   * `settlement_failed` CARRYING the payer's digest. `refused`/`paid` are
+   * defensive - no real flow gives them one - but a deny-list is only as strong as
+   * its list.
    */
-  const TERMINAL: readonly GateOrderStatus[] = [
+  const TERMINAL_MIRROR: readonly GateOrderStatus[] = [
     "settled",
     "settlement_failed",
     "refused",
     "paid",
   ];
+
+  test("the mirrored list is exactly the production terminal-status list", () => {
+    // Set equality, both directions: nothing unpinned, nothing stale. Reported as
+    // sorted arrays so a failure names the offending status.
+    expect([...TERMINAL_MIRROR].sort()).toEqual([...TERMINAL_STATUSES].sort());
+  });
 
   const invoiceFor = (id: string): Invoice => ({
     orderId: id,
@@ -853,7 +869,7 @@ describe("every terminal status that can carry a binding drops it on reuse (R3-1
     ];
     for (const [name, store] of stores) {
       try {
-        for (const status of TERMINAL) {
+        for (const status of TERMINAL_MIRROR) {
           await reuseAfterTerminal(store, status, `reuse-term-${name}-${status}`);
         }
       } finally {

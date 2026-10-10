@@ -1,5 +1,12 @@
 import { Database } from "bun:sqlite";
-import type { GateOrder, GateOrderStore } from "./payment.ts";
+import { TERMINAL_STATUSES, type GateOrder, type GateOrderStore } from "./payment.ts";
+
+/**
+ * The `IN (...)` list for the new-generation `CASE` below, derived from the ONE
+ * terminal-status list in `payment.ts` so the two bundled stores cannot drift.
+ * Hardcoded string literals (not caller input), so interpolating them is safe.
+ */
+const TERMINAL_STATUS_SQL = TERMINAL_STATUSES.map((s) => `'${s}'`).join(", ");
 
 /**
  * Durable implementation of the payment gate's order store. Without this, a
@@ -112,12 +119,14 @@ export class SqliteGateStore implements GateOrderStore {
          -- that is a new order generation on a reused orderId, so the previous
          -- generation's binding is dropped rather than inherited (inheriting it
          -- would settle the new order bound to the previous payer's digest).
-         -- DENY-LIST HAZARD: this IN list and TERMINAL_STATUSES in payment.ts
-         -- must be changed together; a terminal status missing from either one
-         -- silently inherits the old digest (R2-3).
+         -- DENY-LIST HAZARD: a terminal status missing from this list fails
+         -- toward the old bug (R2-3). The list is INTERPOLATED from
+         -- TERMINAL_STATUSES in payment.ts, so the memory store and this store
+         -- cannot disagree; replay_binding.test.ts pins both directions of that
+         -- constant (an entry deleted, and an entry added without being mirrored).
          proof_hash=CASE
            WHEN excluded.status = 'awaiting_payment'
-            AND gate_orders.status IN ('settled', 'settlement_failed', 'refused', 'paid')
+            AND gate_orders.status IN (${TERMINAL_STATUS_SQL})
            THEN excluded.proof_hash
            ELSE COALESCE(excluded.proof_hash, gate_orders.proof_hash)
          END,

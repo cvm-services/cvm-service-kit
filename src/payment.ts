@@ -56,12 +56,15 @@ function digestEquals(a: string | undefined, b: string | undefined): boolean {
  * DENY-LIST HAZARD: a status this list omits is treated as an UPDATE of the
  * stored order rather than a new generation, so the previous generation's digest
  * is inherited (the R2-3 hazard: the new payer is refused, the old proof holder
- * collects). Fail-toward-the-old-bug is inherent to a deny-list, so a new
- * terminal status must be added HERE *and* to the status list in
- * `SqliteGateStore.put`'s `CASE` in the same change; `replay_binding.test.ts`
- * pins every entry by looping over this list.
+ * collects). Fail-toward-the-old-bug is inherent to a deny-list, so this list is
+ * EXPORTED and pinned from both directions by `replay_binding.test.ts`: that test
+ * loops over its own explicit mirror of every entry (so deleting one here fails a
+ * behavioural assertion) and asserts the mirror and this list are the same set
+ * (so ADDING one here without mirroring it fails too). `SqliteGateStore.put`
+ * derives its SQL `IN (...)` list from this constant, so the two stores cannot
+ * drift apart.
  */
-const TERMINAL_STATUSES: readonly GateOrderStatus[] = [
+export const TERMINAL_STATUSES: readonly GateOrderStatus[] = [
   "settled",
   "settlement_failed",
   "refused",
