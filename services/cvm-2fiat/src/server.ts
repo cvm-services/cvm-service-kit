@@ -25,6 +25,7 @@ import {
 import { HttpLocalAdapter } from "./adapter.ts";
 import { twoFiatAnnouncementContent, TWOFIAT_ABOUT, TWOFIAT_SERVICE_CLASS } from "./announce-content.ts";
 import { publishAnnouncement } from "../../../src/announce.ts";
+import { buildTwoFiatEscalation } from "./escalation-wiring.ts";
 import { buildTwoFiatTools } from "./tools.ts";
 
 const RELAYS_DEFAULT = [
@@ -43,6 +44,9 @@ interface Config {
   paymentMode: "none" | "cashu";
   cashuMintUrl: string;
   gateDb: string;
+  escalationDir: string;
+  escalationWindowSeconds: number;
+  escalationSweepMs: number;
   announce: boolean;
   d: string;
   rateCapacity: number;
@@ -54,6 +58,7 @@ function configFromEnv(env: Record<string, string | undefined>): Config {
   if (!secretKey) throw new Error("SERVER_SECRET_KEY is required (64 hex chars)");
   const ownerNpub = env.OWNER_NPUB_HEX ?? "";
   if (!ownerNpub) throw new Error("OWNER_NPUB_HEX is required (card.balance is owner-only by design)");
+  const gateDb = env.GATE_DB ?? "/var/lib/loom/cvm-2fiat/gate.sqlite";
   return {
     secretKey,
     relays: (env.RELAYS ?? RELAYS_DEFAULT.join(",")).split(",").map((s) => s.trim()).filter(Boolean),
@@ -62,7 +67,12 @@ function configFromEnv(env: Record<string, string | undefined>): Config {
     priceBalanceSats: Number(env.PRICE_BALANCE_SATS ?? "0"),
     paymentMode: (env.PAYMENT_MODE as Config["paymentMode"]) ?? "none",
     cashuMintUrl: env.CASHU_MINT_URL ?? "https://testnut.cashu.exchange",
-    gateDb: env.GATE_DB ?? "/var/lib/loom/cvm-2fiat/gate.sqlite",
+    gateDb,
+    // ADR-0012 escalation state: durable intents + escalations live beside the
+    // gate store, so nothing is in memory and a restart loses no barrier.
+    escalationDir: env.ESCALATION_DIR ?? gateDb.replace(/\/[^/]+$/, ""),
+    escalationWindowSeconds: Number(env.ESCALATION_WINDOW_SECONDS ?? String(24 * 60 * 60)),
+    escalationSweepMs: Number(env.ESCALATION_SWEEP_MS ?? String(5 * 60_000)),
     announce: (env.ANNOUNCE ?? "false") !== "false",
     d: env.ANNOUNCE_D ?? "cvm-2fiat-01",
     rateCapacity: Number(env.RATE_CAPACITY ?? "10"),
@@ -119,6 +129,36 @@ async function main() {
   await server.start();
   console.log(`[cvm-2fiat] pubkey: ${pubkeyHexOf(sk)}`);
 
+  // ADR-0012: the escalation is armed here, in the CVM, and its recipient is the
+  // identity the service ALREADY has (OWNER_NPUB_HEX) - no second support npub
+  // to rotate and lose. The durable intent/escalation tables are on disk beside
+  // the gate store: the SQLite row, never the DM and never an in-memory cache,
+  // is the replay barrier.
+  const escalation = buildTwoFiatEscalation({
+    ownerNpub: cfg.ownerNpub,
+    secretKey: cfg.secretKey,
+    publish: (e) => server.publishEvent(e),
+    dataDir: cfg.escalationDir,
+    windowSeconds: cfg.escalationWindowSeconds,
+  });
+  console.log(
+    `[cvm-2fiat] escalation armed: operator=${cfg.ownerNpub}, ` +
+      `window=${cfg.escalationWindowSeconds}s, dir=${cfg.escalationDir}`,
+  );
+
+  // Bounded window: an escalation nobody resolves must not go quiet.
+  const sweepTimer =
+    cfg.escalationSweepMs > 0
+      ? setInterval(() => {
+          void escalation.machine
+            .sweep()
+            .then((alerted) => {
+              if (alerted.length) console.error(`[cvm-2fiat] alerted ${alerted.length} unresolved escalation(s)`);
+            })
+            .catch((e) => console.error(`[cvm-2fiat] escalation sweep failed: ${e?.message ?? e}`));
+        }, cfg.escalationSweepMs)
+      : undefined;
+
   if (cfg.announce) {
     const ann = twoFiatAnnouncementContent(limited.map((t) => t.definition.name));
     await publishAnnouncement(
@@ -141,6 +181,8 @@ async function main() {
   }
 
   const shutdown = () => {
+    if (sweepTimer) clearInterval(sweepTimer);
+    escalation.close();
     server.stop();
     process.exit(0);
   };

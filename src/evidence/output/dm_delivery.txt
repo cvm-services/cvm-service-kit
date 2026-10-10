@@ -1,0 +1,4 @@
+[before] ciphertext hides the text: true
+[before] operator reads:             NOTHING (decryption fails)
+[after]  operator reads:             "intent 7f3a needs a manual refund; sats proof settled"
+PASS: the pre-fix scheme was undeliverable (undecryptable) and the fixed scheme round-trips to the operator.
