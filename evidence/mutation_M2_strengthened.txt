@@ -1,0 +1,27 @@
+# MUTATION M2 vs STRENGTHENED test (ROUNDS=4)
+# mutant: claim decides from a lazily-primed read; UPDATE unguarded (TOCTOU shape)
+# command: bun test src/money_safety.test.ts, run 6 times
+# BEFORE (single round): caught 4 of 6 runs;  AFTER (4 rounds): caught 6 of 6 runs
+
+run1: (fail) SqliteGateStore money safety > exactly one truly concurrent caller wins the claim [2075.08ms]
+run1:  12 pass
+run1:  1 fail
+run1: Ran 13 tests across 1 file. [3.84s]
+run2: (fail) SqliteGateStore money safety > exactly one truly concurrent caller wins the claim [2068.85ms]
+run2:  12 pass
+run2:  1 fail
+run2: Ran 13 tests across 1 file. [5.83s]
+run3: (fail) SqliteGateStore money safety > exactly one truly concurrent caller wins the claim [2070.88ms]
+run3:  12 pass
+run3:  1 fail
+run3: Ran 13 tests across 1 file. [4.36s]
+run4:  13 pass
+run4:  0 fail
+run4: Ran 13 tests across 1 file. [14.62s]
+run5:  13 pass
+run5:  0 fail
+run5: Ran 13 tests across 1 file. [5.24s]
+run6: (fail) SqliteGateStore money safety > exactly one truly concurrent caller wins the claim [2301.92ms]
+run6:  12 pass
+run6:  1 fail
+run6: Ran 13 tests across 1 file. [4.65s]

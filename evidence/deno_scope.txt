@@ -1,0 +1,26 @@
+== SCOPE: what each deno task actually covers ==
+deno.json -> test: 'deno test --allow-read tests/'   check: 'deno check src/mod.ts'
+grep for payment|gate-store in src/mod.ts: NO MATCH, so 'deno task check' alone would NOT have
+typechecked this fix. The changed files are checked explicitly below.
+
+== deno check on the two changed SOURCE files ==
+[0m[32mCheck[0m src/payment.ts
+[0m[32mCheck[0m src/gate-store.ts
+rc=0
+
+== deno check on the new helper (uses bun:sqlite, no Bun.* global) ==
+[0m[32mCheck[0m src/money_safety.lock_holder.ts
+rc=0
+
+== pre-existing cas_runner.ts cannot be deno-checked (uses the Bun global) - unchanged by this card ==
+[0m[32mCheck[0m src/money_safety.cas_runner.ts
+[0m[1mTS2868 [0m[ERROR]: Cannot find name 'Bun'. Do you need to install type definitions for Bun? Try `npm i --save-dev @types/bun` and then add 'bun' to the types field in your tsconfig.
+    at [0m[36mfile:///home/c03rad0r/worktrees/t_e19ad2e9/kit/src/money_safety.cas_runner.ts[0m:[0m[33m29[0m:[0m[33m36[0m
+rc=1
+
+== NEGATIVE CONTROL: does deno check really report errors in these files? ==
+injected: const won: number = this.store.claim(...)   (claim returns boolean)
+[0m[32mCheck[0m src/payment.ts
+[0m[1mTS2322 [0m[ERROR]: Type 'boolean' is not assignable to type 'number'.
+    at [0m[36mfile:///home/c03rad0r/worktrees/t_e19ad2e9/mut/src/payment.ts[0m:[0m[33m253[0m:[0m[33m11[0m
+rc=1
