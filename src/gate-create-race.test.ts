@@ -1,13 +1,12 @@
 /**
  * The gate's CREATE path, which the CAS fix in PR #13 did not cover.
  *
- * `gate()` creates the order when it does not find one, and the write it uses is
+ * `gate()` creates the order when it does not find one, and the write it used is
  * an unconditional upsert. Two callers that both read `undefined` BEFORE either
  * write - which is exactly what a second service process starting mid-flight
  * looks like, and what a restart during an in-flight request looks like - both
  * take the create path. The second `put` then overwrites a row its peer has
- * already advanced to a TERMINAL state, resurrecting a settled order as
- * `awaiting_payment`; the loser of the race now owns a fresh
+ * already advanced (claimed or terminal), so the loser of the race owns a fresh
  * `awaiting_payment -> settlement_reserved` transition and runs the paid action
  * a second time on one payment.
  *
@@ -18,6 +17,11 @@
  * timing-dependent - it is a store that answers the FIRST `get` with the
  * pre-image the second process really read (`undefined`), and delegates
  * afterwards.
+ *
+ * Every test here runs through `ExplicitGate.gate()`, not through the store
+ * directly, so the store-level mutation `create() -> put()` (evidence/
+ * mutation_M3_put_create.txt) makes them fail: they pin the GATE's use of
+ * `create`, which is where the defect was.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
@@ -25,6 +29,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ExplicitGate,
+  PaymentRequiredError,
+  SettlementInProgressError,
   SqliteGateStore,
   type GateOrder,
   type GateOrderStatus,
@@ -48,6 +54,28 @@ class FakeProcessor implements PaymentProcessor {
   }
   async verify(): Promise<boolean> {
     return true;
+  }
+}
+
+/**
+ * A processor whose `verify` is BOUND to the invoice it is handed: the proof is
+ * only good for the invoice it was minted for. This is what makes the
+ * fail-closed claim testable - a proof minted for the caller's own invoice must
+ * be rejected once the gate is verifying the SURVIVING row's invoice.
+ */
+class InvoiceBindingProcessor implements PaymentProcessor {
+  readonly pmi = "pmi:binding";
+  async createInvoice(a: { orderId: string; amountSats: number }): Promise<Invoice> {
+    return {
+      orderId: a.orderId,
+      paymentHash: "hash-" + a.orderId,
+      amountSats: a.amountSats,
+      request: "lnbc-own-" + a.orderId,
+      pmi: this.pmi,
+    };
+  }
+  async verify(invoice: Invoice, proof?: string): Promise<boolean> {
+    return proof === "proof-for:" + invoice.request;
   }
 }
 
@@ -90,6 +118,20 @@ function mkStore(): { store: SqliteGateStore; path: string } {
   return { store: new SqliteGateStore(path), path };
 }
 
+function mkOrder(orderId: string, request: string, status: GateOrderStatus = "awaiting_payment"): GateOrder {
+  const now = Date.now();
+  return {
+    orderId,
+    tool: "create_sms_order",
+    caller: "npub1customer",
+    amountSats: 2100,
+    invoice: { orderId, paymentHash: "hash-" + orderId, amountSats: 2100, request, pmi: "pmi:fake" },
+    status,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 describe("ExplicitGate: an order is CREATED at most once, even with a stale pre-image", () => {
   test(
     "a peer's 'no such order' pre-image cannot resurrect a settled order into a second run",
@@ -123,42 +165,59 @@ describe("ExplicitGate: an order is CREATED at most once, even with a stale pre-
   );
 
   test(
-    "two racing creators converge on ONE row: the second create returns the first one's row",
+    "a stale pre-image cannot clobber a row a peer already CLAIMED: create returns the peer's row, invoice and all",
     async () => {
-      const { store: a, path } = mkStore();
-      const b = new SqliteGateStore(path);
-      const now = Date.now();
-      const mk = (orderId: string): GateOrder => ({
-        orderId,
-        tool: "create_sms_order",
-        caller: "npub1customer",
-        amountSats: 2100,
-        invoice: {
-          orderId,
-          paymentHash: "hash",
-          amountSats: 2100,
-          request: "lnbc-fake",
-          pmi: "pmi:fake",
-        },
-        status: "awaiting_payment",
-        createdAt: now,
-        updatedAt: now,
-      });
+      const { store: real } = mkStore();
 
-      const first = a.create(mk("converge"));
-      expect(first.status).toBe("awaiting_payment");
+      // A peer process created this order and claimed it - the request is
+      // IN FLIGHT. `create()` must hand the loser this row, not replace it.
+      real.create(mkOrder("claimed-by-peer", "lnbc-A"));
+      expect(real.claim("claimed-by-peer", "awaiting_payment", "settlement_reserved")).toBe(true);
 
-      // B's create must be a no-op that returns A's row, never an overwrite.
-      a.claim("converge", "awaiting_payment", "settlement_reserved");
-      a.put({ ...mk("converge"), status: "settled", result: "sent-A" });
+      // Process B takes the create path from its stale "no such order" pre-image.
+      const gateB = new ExplicitGate(new FakeProcessor(), new StaleAbsentStore(real));
+      let runsB = 0;
+      const err = await gateB
+        .gate(req("claimed-by-peer", async () => (runsB++, "sent-B")))
+        .catch((e) => e);
 
-      const second = b.create(mk("converge"));
-      expect(second.status).toBe("settled");
-      expect(second.result).toBe("sent-A");
-      expect(a.get("converge")!.status).toBe("settled");
+      // B loses the claim it thought it was starting, and does NOT run.
+      expect(err).toBeInstanceOf(SettlementInProgressError);
+      expect(runsB).toBe(0);
+      const row = real.get("claimed-by-peer")!;
+      expect(row.status).toBe("settlement_reserved");
+      // The peer's invoice survived: B's create was a no-op, not an overwrite.
+      expect(row.invoice.request).toBe("lnbc-A");
+    },
+    SLOW,
+  );
 
-      a.close();
-      b.close();
+  test(
+    "fail-closed: the loser is verified against the SURVIVING row's invoice, so a proof minted for its OWN invoice settles nothing",
+    async () => {
+      const { store: real } = mkStore();
+
+      // The surviving row is the peer's, still awaiting payment, invoice `lnbc-A`.
+      real.create(mkOrder("mismatch", "lnbc-A"));
+
+      // B's processor mints its own invoice (`lnbc-own-<id>`), so B holds a proof
+      // for an invoice the order book does not have.
+      const gate = new ExplicitGate(new InvoiceBindingProcessor(), new StaleAbsentStore(real));
+      let runs = 0;
+      const err = await gate
+        .gate({ ...req("mismatch", async () => (runs++, "sent")), proof: "proof-for:lnbc-own-mismatch" })
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(PaymentRequiredError);
+      expect(runs).toBe(0);
+      expect(real.get("mismatch")!.status).toBe("awaiting_payment");
+
+      // Positive control: this processor's verify is invoice-bound and CAN return
+      // true - the same row settles once the proof is for the surviving invoice.
+      const ok = await gate.gate({ ...req("mismatch", async () => (runs++, "sent")), proof: "proof-for:lnbc-A" });
+      expect(ok).toBe("sent");
+      expect(runs).toBe(1);
+      expect(real.get("mismatch")!.status).toBe("settled");
     },
     SLOW,
   );

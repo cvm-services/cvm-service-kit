@@ -107,7 +107,16 @@ export class SqliteGateStore implements GateOrderStore {
         order.updatedAt,
       ],
     );
-    return this.get(order.orderId) ?? order;
+    const surviving = this.get(order.orderId);
+    if (surviving === undefined) {
+      // Unreachable while nothing deletes gate rows, but returning `order` here
+      // would be exactly the resurrection this method exists to prevent - the
+      // caller would continue from the row it tried to write. Fail loudly.
+      throw new Error(
+        `gate order ${order.orderId} disappeared between INSERT and read-back: refusing to continue from the caller's own row`,
+      );
+    }
+    return surviving;
   }
 
   put(order: GateOrder): void {

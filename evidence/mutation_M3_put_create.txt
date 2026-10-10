@@ -1,25 +1,52 @@
 bun test v1.4.2 (744846f84)
 
 src/gate-create-race.test.ts:
-113 |       const result = await gateB
-114 |         .gate(req("create-race", async () => (runsB++, "sent-B")))
-115 |         .catch((e) => e);
-116 | 
-117 |       // THE invariant: one payment, one run - B replays A's cached result.
-118 |       expect(runsB).toBe(0);
+155 |       const result = await gateB
+156 |         .gate(req("create-race", async () => (runsB++, "sent-B")))
+157 |         .catch((e) => e);
+158 | 
+159 |       // THE invariant: one payment, one run - B replays A's cached result.
+160 |       expect(runsB).toBe(0);
                           ^
 error: expect(received).toBe(expected)
 
 Expected: 0
 Received: 1
 
-      at <anonymous> (/home/c03rad0r/worktrees/t_936c2a0f/src/gate-create-race.test.ts:118:21)
-(fail) ExplicitGate: an order is CREATED at most once, even with a stale pre-image > a peer's 'no such order' pre-image cannot resurrect a settled order into a second run [5029.55ms]
-(pass) ExplicitGate: an order is CREATED at most once, even with a stale pre-image > two racing creators converge on ONE row: the second create returns the first one's row [1131.79ms]
+      at <anonymous> (/home/c03rad0r/worktrees/t_936c2a0f/src/gate-create-race.test.ts:160:21)
+(fail) ExplicitGate: an order is CREATED at most once, even with a stale pre-image > a peer's 'no such order' pre-image cannot resurrect a settled order into a second run [1375.62ms]
+180 |       const err = await gateB
+181 |         .gate(req("claimed-by-peer", async () => (runsB++, "sent-B")))
+182 |         .catch((e) => e);
+183 | 
+184 |       // B loses the claim it thought it was starting, and does NOT run.
+185 |       expect(err).toBeInstanceOf(SettlementInProgressError);
+                        ^
+error: expect(received).toBeInstanceOf(expected)
 
- 1 pass
- 1 fail
- 8 expect() calls
-Ran 2 tests across 1 file. [10.50s]
+Expected constructor: [class SettlementInProgressError extends Error]
+Received value: "sent-B"
 
-BUN-TEST VERDICT: FAIL rc=1 Ran 2 tests across 1 file. [10.50s] [11s]
+      at <anonymous> (/home/c03rad0r/worktrees/t_936c2a0f/src/gate-create-race.test.ts:185:19)
+(fail) ExplicitGate: an order is CREATED at most once, even with a stale pre-image > a stale pre-image cannot clobber a row a peer already CLAIMED: create returns the peer's row, invoice and all [1460.08ms]
+206 |       let runs = 0;
+207 |       const err = await gate
+208 |         .gate({ ...req("mismatch", async () => (runs++, "sent")), proof: "proof-for:lnbc-own-mismatch" })
+209 |         .catch((e) => e);
+210 | 
+211 |       expect(err).toBeInstanceOf(PaymentRequiredError);
+                        ^
+error: expect(received).toBeInstanceOf(expected)
+
+Expected constructor: [class PaymentRequiredError extends Error]
+Received value: "sent"
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_936c2a0f/src/gate-create-race.test.ts:211:19)
+(fail) ExplicitGate: an order is CREATED at most once, even with a stale pre-image > fail-closed: the loser is verified against the SURVIVING row's invoice, so a proof minted for its OWN invoice settles nothing [624.64ms]
+
+ 0 pass
+ 3 fail
+ 7 expect() calls
+Ran 3 tests across 1 file. [4.83s]
+
+BUN-TEST VERDICT: FAIL rc=1 Ran 3 tests across 1 file. [4.83s] [5s]
