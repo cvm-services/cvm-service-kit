@@ -1,0 +1,36 @@
+# Round-4 suite evidence (t_5b30bdec R3-1)
+# tree: cd1225f1099bafd797f6138b5da31628cf4cfdc9 + working tree
+# bun 1.4.2
+
+$ bun run test
+(pass) cvm-2fiat docs + rail_info > docs serves the contract verbatim, and it carries the refusal list [0.38ms]
+(pass) cvm-2fiat docs + rail_info > rail_info says what the rail is NOT [0.23ms]
+(pass) cvm-2fiat announcement > the announced content carries the refusal list; no tier tag for a field-less service [0.19ms]
+
+1 tests skipped:
+(skip) CashuLnWallet live integration > fund, makeInvoice, melt (payInvoice)
+
+ 247 pass
+ 1 skip
+ 0 fail
+ 10805 expect() calls
+Ran 248 tests across 36 files. [28.95s]
+exit=0
+
+$ bun run typecheck
+$ tsc --noEmit
+exit=0
+
+$ deno task check
+[0m[32mTask[0m [0m[36mcheck[0m deno check src/mod.ts
+[0m[32mCheck[0m src/mod.ts
+exit=0
+
+$ deno task test
+sentinel consistency is advisory, not a hard gate ... [0m[32mok[0m [0m[38;5;245m(220µs)[0m
+assertAnnouncementTags throws on a violation, returns otherwise ... [0m[32mok[0m [0m[38;5;245m(906µs)[0m
+the max-only tier makes the coarse filter a single server-side REQ ... [0m[32mok[0m [0m[38;5;245m(311µs)[0m
+
+[0m[32mok[0m | 24 passed | 0 failed [0m[38;5;245m(408ms)[0m
+
+exit=0

@@ -33,6 +33,7 @@ import {
   SettlementInProgressError,
   proofHash,
   type GateOrder,
+  type GateOrderStatus,
   type GateOrderStore,
   type Invoice,
   type PaymentProcessor,
@@ -739,6 +740,125 @@ describe("a reused orderId does not inherit the previous order's binding (R2-3)"
       ).rejects.toBeInstanceOf(SettlementEvidenceMismatchError);
 
       if (store instanceof SqliteGateStore) store.close();
+    }
+  });
+});
+
+describe("every terminal status that can carry a binding drops it on reuse (R3-1)", () => {
+  /**
+   * Mirrors `TERMINAL_STATUSES` in src/payment.ts and the status list in
+   * `SqliteGateStore.put`'s CASE. The R2-3 test only exercised `settled`, so a
+   * mutant that deleted ONE entry (e.g. `settlement_failed`) from either list
+   * passed the whole suite - even though `settlement_failed` is the load-bearing
+   * entry: the claim records the digest at `settlement_reserved`, so a row whose
+   * action then threw sits at `settlement_failed` CARRYING the payer's digest.
+   */
+  const TERMINAL: readonly GateOrderStatus[] = [
+    "settled",
+    "settlement_failed",
+    "refused",
+    "paid",
+  ];
+
+  const invoiceFor = (id: string): Invoice => ({
+    orderId: id,
+    paymentHash: `cashu:${id}`,
+    amountSats: 21,
+    request: `cashu:https://mint.example:21`,
+    pmi: "bitcoin-cashu",
+  });
+
+  /**
+   * Generation 1 leaves the order at `status` CARRYING token-A's digest (the
+   * precondition that makes the entry load-bearing). Then the same orderId is
+   * reused for a new order, which must settle with its own - here absent -
+   * evidence and must NOT hand token-A the new result.
+   */
+  async function reuseAfterTerminal(
+    store: GateOrderStore,
+    status: GateOrderStatus,
+    id: string,
+  ): Promise<void> {
+    const gate = new ExplicitGate(new ProofProcessor(["token-A"]), store);
+    const base = invoiceFor(id);
+
+    if (status === "settled") {
+      // Real path: settle with token-A.
+      expect(await gate.gate(call(id, "token-A", async () => "first-result"))).toBe(
+        "first-result",
+      );
+    } else if (status === "settlement_failed") {
+      // Real path: the sats are taken, the claim records the digest, THEN the
+      // action throws - so the terminal row carries the payer's digest.
+      await expect(
+        gate.gate(
+          call(id, "token-A", async () => {
+            throw new Error("action blew up");
+          }),
+        ),
+      ).rejects.toThrow("action blew up");
+    } else {
+      // `refused` / `paid` are not reachable from the gate carrying a digest, so
+      // construct the worst case directly: a terminal row that DOES carry one.
+      store.put({
+        orderId: id,
+        tool: "tool:paid_work",
+        caller: "npub1payer",
+        amountSats: 21,
+        invoice: base,
+        status,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        proofHash: proofHash("token-A"),
+      });
+    }
+
+    const terminal = store.get(id)!;
+    expect(terminal.status).toBe(status);
+    expect(terminal.proofHash).toBe(proofHash("token-A"));
+
+    // A used orderId reused for a NEW order (a client recycling its id, an
+    // operator reset - the same write the R2-3 test makes).
+    store.put({
+      ...terminal,
+      status: "awaiting_payment",
+      result: undefined,
+      failure: undefined,
+      proofHash: undefined,
+      invoice: { ...base, paymentHash: `ln-${id}`, request: `lnbc${id}` },
+      updatedAt: Date.now(),
+    });
+
+    // Generation 2 settles with NO client proof (an invoice-polling pmi).
+    const pollGate = new ExplicitGate(new PollingProcessor(), store);
+    expect(await pollGate.gate(call(id, undefined, async () => "second-result"))).toBe(
+      "second-result",
+    );
+    // Its binding is its own (none) - NOT the previous generation's digest.
+    expect(store.get(id)!.proofHash).toBeUndefined();
+    // So its own payer collects it...
+    expect(await pollGate.gate(call(id, undefined, async () => "second-result"))).toBe(
+      "second-result",
+    );
+    // ...and the previous generation's proof does not.
+    await expect(gate.gate(call(id, "token-A", async () => "first-result"))).rejects.toBeInstanceOf(
+      SettlementEvidenceMismatchError,
+    );
+  }
+
+  test("all four terminal statuses, on both bundled stores", async () => {
+    const stores: [string, GateOrderStore][] = [
+      ["memory", new MemoryOrderStore()],
+      ["sqlite", new SqliteGateStore(join(mkdtempSync(join(tmpdir(), "reuse-term-")), "g.sqlite"))],
+    ];
+    for (const [name, store] of stores) {
+      try {
+        for (const status of TERMINAL) {
+          await reuseAfterTerminal(store, status, `reuse-term-${name}-${status}`);
+        }
+      } finally {
+        if (store instanceof SqliteGateStore) store.close();
+      }
     }
   });
 });

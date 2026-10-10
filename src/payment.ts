@@ -50,7 +50,17 @@ function digestEquals(a: string | undefined, b: string | undefined): boolean {
   return timingSafeEqual(ea, eb);
 }
 
-/** A status the gate will never move out of on its own. */
+/**
+ * A status the gate will never move out of on its own.
+ *
+ * DENY-LIST HAZARD: a status this list omits is treated as an UPDATE of the
+ * stored order rather than a new generation, so the previous generation's digest
+ * is inherited (the R2-3 hazard: the new payer is refused, the old proof holder
+ * collects). Fail-toward-the-old-bug is inherent to a deny-list, so a new
+ * terminal status must be added HERE *and* to the status list in
+ * `SqliteGateStore.put`'s `CASE` in the same change; `replay_binding.test.ts`
+ * pins every entry by looping over this list.
+ */
 const TERMINAL_STATUSES: readonly GateOrderStatus[] = [
   "settled",
   "settlement_failed",

@@ -112,6 +112,9 @@ export class SqliteGateStore implements GateOrderStore {
          -- that is a new order generation on a reused orderId, so the previous
          -- generation's binding is dropped rather than inherited (inheriting it
          -- would settle the new order bound to the previous payer's digest).
+         -- DENY-LIST HAZARD: this IN list and TERMINAL_STATUSES in payment.ts
+         -- must be changed together; a terminal status missing from either one
+         -- silently inherits the old digest (R2-3).
          proof_hash=CASE
            WHEN excluded.status = 'awaiting_payment'
             AND gate_orders.status IN ('settled', 'settlement_failed', 'refused', 'paid')
