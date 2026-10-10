@@ -1,0 +1,6 @@
+$ bun run src/evidence/red_before.ts
+[red] unpaid 100-sat call refused as expected (invoice #1, 100 sats)
+[red] mismatched re-use was ACCEPTED (result="second")
+[red] invoices minted: 1; fiat attempts: 1
+LEAK PRESENT: one settlement produced 1 fiat attempt(s) and the binding (caller/tool/amount/order) was not checked
+(exit: 1 = the leak IS present on the base gate - this is the pre-fix behaviour)
