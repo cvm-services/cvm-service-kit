@@ -227,3 +227,48 @@ grep -rn -iE "replica|scale|cluster|instances" deploy/
 bun run typecheck          # compiles src + services against the changed interface
 bun test services/cvm-sms4sats/src/gate-durability.test.ts
 ```
+
+## F8. Recovery from the two terminal states (the review's HIGH finding) — implemented
+
+The cross-family review's HIGH finding was independent of the consumer question: the gate
+correctly never re-runs an action against a verified payment, but that left two states with
+no exit — `settlement_reserved` (crashed after the claim) and `settlement_failed` (action
+failed) — i.e. "money taken, order stuck", with no lease, no reconcile/refund command and
+no ops runbook.
+
+Implemented as an operator path that cannot be automatic, because **whether a crashed
+`settlement_reserved` action reached the venue is knowable only by looking at the venue**;
+a lease expiry is indistinguishable from a slow action, so an automatic release would
+re-run an action of unknown outcome — the original double spend.
+
+| piece | what it does |
+| --- | --- |
+| `src/gate-recovery.ts` | `findStuckOrders` (read-only: reserved + failed, with age and lease flag), `releaseReservation` (CAS `settlement_reserved -> awaiting_payment`, refuses a live lease unless `force`), `recordCompensation` (durable audit record for a `settlement_failed` order; deliberately leaves the status alone) |
+| `src/gate-recovery-cli.ts` | `bun src/gate-recovery-cli.ts list\|release\|compensate --db <gate.sqlite>`; exit 1 on refusal, 2 on usage error |
+| `src/gate-store.ts` | `list(statuses?)` + a `gate_recovery` table (`putResolution`/`listResolutions`). `list` is on the concrete store, NOT on the `GateOrderStore` interface — the interface is not widened again |
+| `src/gate-recovery.test.ts` | 5 tests, including the falsification control that inspecting is read-only, that a live lease is refused and `list` alone never moves a row |
+| `docs/gate-recovery-runbook.md` | the operator procedure, per-service gate DB paths, and the hard rules |
+
+Two properties the tests pin down explicitly:
+
+* **The escape hatch works end to end.** Crash after claim → `SettlementInProgressError`
+  for the caller; `releaseReservation` past the lease → the retry re-verifies, claims and
+  runs the tool **once**; a further replay returns the cache.
+* **Nothing can be resurrected.** `releaseReservation` refuses any order that is not
+  currently `settlement_reserved` (settled and failed rows both refuse), and
+  `recordCompensation` refuses anything that is not `settlement_failed`. A compensated
+  order still throws `SettlementFailedError` with `runs === 0`.
+
+## Status of the review's other findings on `fix/gate-consumer-audit`
+
+| finding | status |
+| --- | --- |
+| BLOCKER: five consumers vs `claim` / terminal states | **closed** — F1–F7 above; the premise was false and the one real defect (`cvm-sms4sats` in-memory store) is fixed |
+| HIGH: no recovery path | **closed** — F8 |
+| MED: unenumerated statuses fall through to `run()` | already fixed in the merged gate (`src/payment.ts`, exhaustive switch + `default`); covered by `money_safety.test.ts` "an unrecognised order status is refused, never run" |
+| MED: terminal write unguarded (SQLITE_BUSY pins the row) | already fixed in the merged gate (both terminal `put`s wrapped, fail closed); covered by the lock-contention test |
+| MED: `rejects.toThrow()` with no argument | already fixed — the test now asserts `SettlementFailedError` + code + orderId + message |
+| MED: comment contradicts the mutation table | **closed** — the `~99%` claim is removed from the concurrency test comment and both stale rows in `REPORT.md` carry the re-measurement (M1 caught, M2 4-of-6 at any round count) |
+| MED: `GateOrder.failure` with no DDL/migration; `changes === 1` presumes a unique key | already fixed — explicit `ALTER TABLE` migration + `order_id TEXT PRIMARY KEY`; covered by the pre-fix-database migration test |
+| LOW: `deno.lock` riding in an unrelated commit | **closed** — split into its own commit (`chore(deno): reconcile the committed deno.lock with package.json`) |
+| UNVERIFIED: replay guard keying on `result !== undefined` | **closed** — the guard is `status === "settled"`, and the "void tool (run() returns undefined)" test pins it against both stores |

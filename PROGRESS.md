@@ -86,3 +86,27 @@ verification, and the ADR-0012 escalation state machine.
 - Suite: 216 pass / 1 skip / 0 fail (217 tests / 35 files). `tsc --noEmit` exit 0.
 - Evidence: `src/evidence/output/{red_before,run1,run2,run3,dm_delivery,mutation,suite,typecheck,armed}.txt`.
 - Everything committed and pushed. No unpushed commits.
+
+## t_7233c336 — PR #13 money gate: consumer audit (BLOCKING) + recovery path + test hardening (2026-10-10)
+
+Branch `fix/gate-consumer-audit` (base `github/main` @ `e2a7065`; PR #13 itself is MERGED).
+Report: `REPORT.md` section "t_7233c336 (2026-10-10)". Audit doc: `docs/gate-consumer-audit.md`.
+Runbook: `docs/gate-recovery-runbook.md`. Evidence: `evidence/recovery/`.
+
+- finding: the audit premise was FALSE - the five "consumers" are directories in THIS repo, not
+  repositories; all are compiled by the same `tsc --noEmit`, none owns a GateOrderStore and none
+  branches on a gate status | status: AUDITED (F1-F4, F7) - no cross-repo break is possible
+- finding: the ONE real consumer defect - `cvm-sms4sats` passed NO store, so the gate kept its
+  settled-memory in an in-process Map lost on every `Restart=always` | status: FIXED (64daf9e),
+  falsification control in services/cvm-sms4sats/src/gate-durability.test.ts
+- finding (HIGH): no escape hatch for settlement_reserved / settlement_failed | status: FIXED
+  (operator recovery: src/gate-recovery.ts + gate-recovery-cli.ts + runbook + 6 tests);
+  deliberately NOT automatic - a lease only flags, it never moves a row
+- finding (MED): the concurrency comment claimed ~99% detection at 4 rounds while the mutation row
+  said "not caught"; evidence/README.md claimed 6 of 6, refuted by its own log | status: FIXED
+  (claim removed; both stale REPORT.md rows + the README row carry the correction)
+- other MEDs (status fall-through, unguarded terminal write, bare rejects.toThrow, failure DDL,
+  deno.lock split, void-tool replay guard) were already fixed by the MERGED gate or the earlier
+  commit on this branch; each now carries a named test or a correction - table F8.2
+- green: bun test src/gate-recovery.test.ts 6/6; bun run test 231 pass/1 skip/0 fail (37 files);
+  bun run typecheck rc=0; deno task check + deno check <4 files> rc=0; CLI usage rc=2, list rc=0

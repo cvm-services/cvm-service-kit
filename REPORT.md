@@ -1,5 +1,109 @@
 # REPORT - gate money-safety fix (fix/gate-money-safety)
 
+## t_7233c336 (2026-10-10) - consumer audit + operator recovery path + test hardening
+
+Branch `fix/gate-consumer-audit`, based on `github/main` @ `e2a7065` (PR #13 itself is merged).
+Full audit: `docs/gate-consumer-audit.md`. Runbook: `docs/gate-recovery-runbook.md`.
+Evidence: `evidence/recovery/`.
+
+The cross-family review of PR #13 (`deepseek-flash`, verdict BLOCKED) had one BLOCKER and one HIGH.
+Both are closed here; the MEDs were mostly already fixed by the merged gate and are now either
+covered by a named test or reconciled in the documents that contradicted each other.
+
+### 1. BLOCKER: the five consumers - the premise was false, and one real defect was hiding
+
+The review assumed `cvm-sms4sats`, `cvm-ppq`, `cvm-nanogpt`, `cvm-lambda` and `cvm-2fiat` are
+separate repositories consuming a published kit, so a consumer-owned store missing the new
+`claim` would throw `this.store.claim is not a function` **after** payment was verified.
+
+They are not repositories at all: `gh repo list cvm-services` has none of those names, and all five
+are directories under `services/` in **this** repo, importing the gate through relative paths
+(`../../../src/index.ts`) and compiled by the same `tsc --noEmit` (`tsconfig.json` includes
+`src/**/*.ts` and `services/**/*.ts`). There is no cross-repo version skew to break.
+
+`grep -rn "implements GateOrderStore" src services` returns exactly two classes, both in the kit, and
+`grep -rn ": GateOrderStore" src services` returns one construction site - the gate's own default.
+No consumer owns a store, and no consumer branches on a gate status (`src/payment.ts:195` is the only
+`.status ===` on a `GateOrder` in the tree). So the `TypeError` failure mode does not exist and the
+new terminal states break nothing downstream.
+
+The audit did find one real consumer defect, which F5 of the audit document and commit `64daf9e`
+fix: **`cvm-sms4sats` passed no store at all**, so the gate's own memory of "this payment is settled"
+lived in an in-process `Map`. With `Restart=always` (the deployed unit), a replayed proof was
+re-verified against a still-settled invoice and the paid tool ran a second time against one payment -
+the double spend the gate exists to prevent, for that tool shape. It now builds
+`SqliteGateStore(cfg.gateDb)`, with a falsification control in
+`services/cvm-sms4sats/src/gate-durability.test.ts` (pre-fix shape: `runs === 2`; fixed: `runs === 1`).
+
+Multi-replica exposure was measured rather than assumed: no replica/scale/cluster instancing exists
+anywhere in `deploy/`, so the single-process `MemoryOrderStore` was not reachable - but with
+`cvm-sms4sats` moved off it, no shipped service constructs a gate over the in-memory store any more.
+
+### 2. HIGH: no recovery path for `settlement_reserved` / `settlement_failed` (implemented)
+
+The reviewer's HIGH finding: the gate correctly never re-runs an action against a verified payment,
+but that left "money taken, order stuck" with no lease, no reconcile/refund command and no runbook.
+
+Implemented as an operator path that is deliberately **not** automatic. Whether a crashed
+`settlement_reserved` action ever reached the venue is knowable only by looking at the venue; a
+crashed action and a slow one are indistinguishable from the store, so an automatic release (lease
+expiry, timeout sweep) would re-run an action of unknown outcome - the original double spend. The
+lease only decides what to *flag*.
+
+| file | what it adds |
+| --- | --- |
+| `src/gate-recovery.ts` | `findStuckOrders` (read-only report of `settlement_reserved` + `settlement_failed`, with age and lease flag), `releaseReservation` (CAS `settlement_reserved -> awaiting_payment` through the SAME guarded UPDATE the gate uses; refuses a live lease unless `force`), `recordCompensation` (durable audit record for a `settlement_failed` order; deliberately does not touch the status) |
+| `src/gate-recovery-cli.ts` | `bun src/gate-recovery-cli.ts list\|release\|compensate` (`bun run gate-recovery`); exit 0 done, 1 refused, 2 usage error |
+| `src/gate-store.ts` | `list(statuses?)` + a `gate_recovery` table. `list` is deliberately on the concrete store, NOT on the `GateOrderStore` interface - the shared primitive is not widened a second time |
+| `src/gate-recovery.test.ts` | 6 tests (see below) |
+| `docs/gate-recovery-runbook.md` | the operator procedure: per-service gate DB paths, the venue check that must precede a release, and the hard rules |
+
+What the tests pin down, and the falsification controls among them:
+
+* **Inspecting changes nothing.** A crashed reservation is surfaced with its age; past the lease it is
+  flagged, and the row is still `settlement_reserved` afterwards - `findStuckOrders` is read-only.
+* **A live lease is refused.** `releaseReservation` on a 1-minute-old reservation refuses with
+  `lease_active` and the status is unchanged; past the lease it releases, and the retry then runs the
+  tool exactly once (a further replay returns the cache) - the escape hatch works end to end.
+* **Release is a CAS, not a blind put.** Two connections over one file: after one releases, the
+  other's release loses with `not_reserved`. A blind-put implementation would hand out two retries.
+* **Nothing terminal can be resurrected.** `releaseReservation` refuses settled and failed rows;
+  `recordCompensation` refuses anything not `settlement_failed`; a compensated order still throws
+  `SettlementFailedError` with `runs === 0`, and the compensation survives a restart.
+
+### 3. MEDs: what was already fixed by the merged gate, and the one contradiction that was real
+
+| review finding | disposition |
+| --- | --- |
+| unenumerated statuses fall through to `run()` | already fixed in the merged gate: exhaustive `switch` + `default: deny` (`src/payment.ts`); covered by "an unrecognised order status is refused, never run" |
+| terminal write unguarded (SQLITE_BUSY pins the row) | already fixed: both terminal `put`s wrapped, fail closed; covered by the lock-contention test |
+| `rejects.toThrow()` with no argument | already fixed: asserts `SettlementFailedError` + code + orderId + message |
+| `GateOrder.failure` with no DDL/migration; `changes === 1` presumes a unique key | already fixed: explicit `ALTER TABLE` migration, `order_id TEXT PRIMARY KEY`; covered by the pre-fix-database migration test |
+| **comment contradicts the mutation table** | **real, and fixed here.** `src/money_safety.test.ts`'s concurrency comment claimed 4 rounds take detection to `~1-(1/3)^4 (~99%)` while the mutation row recorded 0 fail, and `evidence/README.md` claimed the strengthened run caught the mutant `6 of 6` - both refuted by the committed log in `evidence/mutation_M2_strengthened.txt` (runs 4 and 5 are `13 pass / 0 fail`). The `~99%` claim is removed, the comment now states the measured 4-of-6 (no improvement over a single round, no percentage claimed), and the two stale `REPORT.md` rows plus the `evidence/README.md` row carry the correction with the M1 re-measurement (snapshot-cache mutant: **now caught**, 2 failures) |
+| `deno.lock` riding in an unrelated commit | closed: split into its own commit `cc38d9e` |
+| UNVERIFIED: replay guard keying on `result !== undefined` | closed: the guard is `status === "settled"`, pinned by the "void tool (`run()` returns undefined)" test against **both** stores |
+
+### Verification (this card's run, bun 1.4.2 / deno 2.9.0)
+
+```
+bun test src/gate-recovery.test.ts        6 pass / 0 fail   rc=0   evidence/recovery/recovery_tests.txt
+bun run test                             231 pass / 1 skip / 0 fail (37 files) rc=0  evidence/recovery/suite_bun.txt
+bun run typecheck   (tsc --noEmit)        rc=0                       evidence/recovery/typecheck.txt
+deno task check + deno check <4 files>    rc=0                       evidence/recovery/deno_check.txt
+bun src/gate-recovery-cli.ts              usage -> rc=2, list -> rc=0  evidence/recovery/cli_smoke.txt
+```
+
+`bun test src/money_safety.test.ts` (13 tests, the merged gate's suite) is part of the 231 and stayed
+green after the comment edit. `deno.lock` is unchanged by this card's deno runs.
+
+### Boundary, stated
+
+The recovery path is an **operator** tool: it does not, and must not, decide on its own whether a
+stuck order may be re-driven. Its two commands are also not wired into any service's HTTP surface -
+an operator runs them against the service's `gate.sqlite`. Wiring a `reconcile` entry point into a
+service (with authentication) is a separate card if it is wanted; the durable record it needs
+(`gate_recovery`) is in place here.
+
 ## t_e19ad2e9 (2026-10-10) - close the money-safety gaps left open by the sections below
 
 Commit `b4ecf58` on `fix/gate-money-safety` (base `b35b916`). Two of the three items the body of
@@ -339,14 +443,21 @@ Falsification, observed - each mutation applied to `src/gate-store.ts`, suite ru
 | `UPDATE` drops `AND status = ?` (guard forgotten) | **2 fail** (truth table, cross-connection) |
 | `claim` always returns `true` (still writes) | **2 fail** (truth table, cross-connection) |
 | `claim` always returns `true`, never touches the DB | **3 fail** (also the concurrency test: 3 winners) |
-| `claim` as JS check-then-set, write unguarded (TOCTOU) | 0 fail - **not caught** |
-| `claim` decided from an in-memory snapshot cache | 0 fail - **not caught** |
+| `claim` as JS check-then-set, write unguarded (TOCTOU) | 0 fail - **not caught** in one round, `b35b916`. Re-measured 2026-10-10 at 4 rounds: **caught in 4 of 6 runs** - still not reliable (`evidence/mutation_M2_strengthened.txt`) |
+| `claim` decided from an in-memory snapshot cache | 0 fail - **not caught** at `b35b916`. Re-measured 2026-10-10 against the grown suite: **2 fail - caught** (`evidence/mutation_M1_snapshot_cache.txt`) |
 
-The first three are the realistic ways to break a CAS gate, and they fail loudly. The last two are a
-recorded limit, not a secret: a decision that is separated from its write only by a synchronous
-`SELECT`/`UPDATE` pair inside one scheduling slice cannot be observed black-box, because SQLite's
-write lock serialises the pair before a test could interleave it (it stayed closed at 8, 24 and 48
-simultaneous callers). Catching those needs an injected pause inside the store, i.e. testing the
+CORRECTION (2026-10-10, review F1): the two rows above are the `b35b916` measurement. The
+snapshot-cache row is **no longer a limit** - it is caught deterministically - and the TOCTOU row
+**gains nothing measurable from the extra rounds**. See "Mutation re-measurement" above.
+
+The first three are the realistic ways to break a CAS gate, and they fail loudly. The snapshot-cache
+row is no longer among the limits: re-measured 2026-10-10 it is caught by the truth-table and
+cross-connection tests (see "Mutation re-measurement" above), which is why that row carries a
+correction. The TOCTOU row remains a recorded limit *for any number of black-box rounds*: a decision
+separated from its write only by a synchronous `SELECT`/`UPDATE` pair inside one scheduling slice
+cannot be observed black-box, because SQLite's write lock serialises the pair before a test could
+interleave it (it stayed closed at 8, 24 and 48 simultaneous callers), and 4 rounds measured the same
+4-of-6 as 1 round. Catching that needs an injected pause inside the store, i.e. testing the
 implementation rather than the contract. What makes the shipped implementation safe is structural -
 the comparison and the write are **one statement** - which is why the truth table is written over
 `from` and why the guard-removal mutation is the one that must fail it.
