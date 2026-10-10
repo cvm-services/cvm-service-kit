@@ -307,6 +307,16 @@ export class CvmServer {
     await this.publishToAll(event, `publish ${args.kind} failed`);
     return event;
   }
+
+  /**
+   * Publish an ALREADY-SIGNED event to all connected relays.
+   * This is the sink the ADR-0012 escalation uses: the gift wrap is built and
+   * signed elsewhere (`NostrDmSink`), and the CVM only ships it. Failing
+   * relays are logged and dropped, never awaited forever.
+   */
+  async publishEvent(event: Event): Promise<void> {
+    await this.publishToAll(event, `publish ${event.kind} failed`);
+  }
 }
 
 function ok(id: unknown, result: unknown) {

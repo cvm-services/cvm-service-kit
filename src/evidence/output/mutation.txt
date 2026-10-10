@@ -1,0 +1,19 @@
+MUTATION PROOF - card t_89dcb160
+Two invariants disabled at once in src/intent-store.ts:
+  A) assertBindingMatches: `a !== b` -> `a !== b && false` (binding never refuses)
+  B) MemoryIntentStore.reserve: `cur.status !== from` -> `false` (claim never conditional)
+
+--- with the mutants in place ---
+(pass) settled means a processor-confirmed FINAL receipt > a terminal refund is never re-run [363.98ms]
+
+ 20 pass
+ 5 fail
+ 10076 expect() calls
+Ran 25 tests across 2 files. [7.21s]
+--- restored (unmutated) ---
+(pass) settled means a processor-confirmed FINAL receipt > a terminal refund is never re-run [301.13ms]
+
+ 25 pass
+ 0 fail
+ 10100 expect() calls
+Ran 25 tests across 2 files. [5.00s]
