@@ -22,6 +22,7 @@ import {
   SettlementFailedError,
   type GateOrder,
   type GateOrderStatus,
+  type GateOrderStore,
   type Invoice,
   type PaymentProcessor,
 } from "./payment.ts";
@@ -158,6 +159,38 @@ describe("ExplicitGate money safety", () => {
     expect((err as GateOrderStateError).status).toBe("paid");
     expect(runs).toBe(0);
   });
+
+  test("a void tool (run() returns undefined) still replays from the cache", async () => {
+    // The replay guard must key on the order STATUS, not on `result !== undefined`.
+    // A void tool legitimately returns `undefined`; if the guard tested the result,
+    // such a settled order would fall through every status guard and call
+    // `run()` again against the same payment - the original double spend, back
+    // for that tool shape. Both stores are exercised: `SqliteGateStore` stores a
+    // missing result as SQL NULL and reads it back as `undefined`, so a
+    // result-keyed guard fails there too.
+    const stores: Array<[string, GateOrderStore]> = [
+      ["memory", new MemoryOrderStore()],
+      ["sqlite", (() => {
+        const { store } = mkStore();
+        return store;
+      })()],
+    ];
+
+    for (const [kind, store] of stores) {
+      const processor = new FakeProcessor();
+      processor.paid = true;
+      const gate = new ExplicitGate(processor, store);
+      let runs = 0;
+      const voidRun = async () => {
+        runs++;
+        return undefined;
+      };
+
+      expect(await gate.gate(req(`void-${kind}`, voidRun))).toBeUndefined();
+      expect(await gate.gate(req(`void-${kind}`, voidRun))).toBeUndefined();
+      expect(runs).toBe(1);
+    }
+  }, SLOW);
 
   test("concurrent calls run the tool exactly once", async () => {
     const processor = new FakeProcessor();
@@ -436,15 +469,18 @@ describe("SqliteGateStore money safety", () => {
       // lock, exactly one takes the row and the rest fail closed, so it
       // demonstrates the "never two winners" invariant.
       //
-      // A single round is NOT enough to rely on. Against a mutant whose claim
-      // reads the row and only THEN writes it unguarded (the TOCTOU shape), one
-      // round caught it in 4 of 6 runs - the losing window is one synchronous
-      // statement pair, so it only trips when two processes genuinely interleave.
-      // ROUNDS independent rounds take that to ~1 - (1/3)^ROUNDS (~99% at 4) for
-      // about half a second each, which is what a double-spend invariant is worth.
-      // An implementation that answers from a comparison instead of a statement is
-      // still caught DETERMINISTICALLY by the truth-table and cross-connection
-      // tests above (measured: 2 failures).
+      // A single round is NOT enough to rely on as a mutant-killer. Against a
+      // mutant whose claim reads the row and only THEN writes it unguarded (the
+      // TOCTOU shape), one round caught it in 4 of 6 runs - the losing window is
+      // one synchronous statement pair, so it only trips when two processes
+      // genuinely interleave. Four rounds are kept as defence in depth, but the
+      // committed 6-run measurement of the 4-round loop caught that mutant in the
+      // SAME 4 of 6 runs, so this sample shows NO measured improvement and NO
+      // detection percentage is claimed for this test (REPORT.md, "Mutation
+      // re-measurement"). What carries the guarantee is the DETERMINISTIC
+      // truth-table and cross-connection tests above: an implementation that
+      // answers from a comparison instead of a statement fails those on every run
+      // (measured: 2 failures).
       const CALLERS = 3;
       const ROUNDS = 4;
       const runner = fileURLToPath(new URL("./money_safety.cas_runner.ts", import.meta.url));

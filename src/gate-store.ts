@@ -1,5 +1,18 @@
 import { Database } from "bun:sqlite";
-import type { GateOrder, GateOrderStore } from "./payment.ts";
+import type { GateOrder, GateOrderStatus, GateOrderStore } from "./payment.ts";
+
+/**
+ * Operator bookkeeping for a terminal failure the gate (correctly) refuses to
+ * re-run: the sats were taken and the action failed, and an operator has since
+ * compensated the customer. This is an AUDIT RECORD, not a status change - see
+ * `src/gate-recovery.ts` for why the order status is deliberately left alone.
+ */
+export interface GateResolution {
+  orderId: string;
+  outcome: string;
+  note: string;
+  at: number;
+}
 
 /**
  * Durable implementation of the payment gate's order store. Without this, a
@@ -40,11 +53,18 @@ export class SqliteGateStore implements GateOrderStore {
     if (!columns.some((c) => c.name === "failure_json")) {
       this.db.run(`ALTER TABLE gate_orders ADD COLUMN failure_json TEXT`);
     }
+    // Recovery records are a NEW table, so `IF NOT EXISTS` is a real create here -
+    // no ALTER migration is needed for it.
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS gate_recovery (
+        order_id TEXT PRIMARY KEY,
+        outcome TEXT NOT NULL,
+        note TEXT NOT NULL,
+        at INTEGER NOT NULL
+      )`);
   }
 
-  get(orderId: string): GateOrder | undefined {
-    const row = this.db.query(`SELECT * FROM gate_orders WHERE order_id = ?`).get(orderId) as any;
-    if (!row) return undefined;
+  private static rowToOrder(row: any): GateOrder {
     return {
       orderId: row.order_id,
       tool: row.tool,
@@ -57,6 +77,34 @@ export class SqliteGateStore implements GateOrderStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  get(orderId: string): GateOrder | undefined {
+    const row = this.db.query(`SELECT * FROM gate_orders WHERE order_id = ?`).get(orderId) as any;
+    if (!row) return undefined;
+    return SqliteGateStore.rowToOrder(row);
+  }
+
+  /**
+   * Every order in one of `statuses` (all orders when omitted), oldest first.
+   *
+   * Deliberately NOT part of the `GateOrderStore` interface: the gate itself only
+   * ever needs point reads, and widening the shared primitive is what the PR #13
+   * audit was about. Enumeration is an operator/recovery need that only makes
+   * sense over a durable store, so it lives on the concrete implementation.
+   */
+  list(statuses?: GateOrderStatus | GateOrderStatus[]): GateOrder[] {
+    const want = statuses === undefined ? [] : Array.isArray(statuses) ? statuses : [statuses];
+    const rows =
+      want.length === 0
+        ? this.db.query(`SELECT * FROM gate_orders ORDER BY updated_at ASC`).all()
+        : this.db
+            .query(
+              `SELECT * FROM gate_orders WHERE status IN (${want.map(() => "?").join(",")})
+               ORDER BY updated_at ASC`,
+            )
+            .all(...want);
+    return (rows as any[]).map(SqliteGateStore.rowToOrder);
   }
 
   /**
@@ -74,6 +122,26 @@ export class SqliteGateStore implements GateOrderStore {
       [to, Date.now(), orderId, from],
     );
     return Number(res.changes ?? 0) === 1;
+  }
+
+  /** Record an operator compensation for a terminal failure (audit trail). */
+  putResolution(resolution: GateResolution): void {
+    this.db.run(
+      `INSERT INTO gate_recovery (order_id, outcome, note, at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(order_id) DO UPDATE SET
+         outcome=excluded.outcome, note=excluded.note, at=excluded.at`,
+      [resolution.orderId, resolution.outcome, resolution.note, resolution.at],
+    );
+  }
+
+  listResolutions(): GateResolution[] {
+    const rows = this.db.query(`SELECT * FROM gate_recovery ORDER BY at ASC`).all() as any[];
+    return rows.map((r) => ({
+      orderId: r.order_id,
+      outcome: r.outcome,
+      note: r.note,
+      at: r.at,
+    }));
   }
 
   /** Release the SQLite handle, so a test runner can exit. */
