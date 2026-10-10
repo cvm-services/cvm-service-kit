@@ -1,0 +1,344 @@
+bun test v1.4.2 (744846f84)
+
+src/l402.test.ts:
+(pass) parse challenge > WWW-Authenticate header [0.27ms]
+(pass) parse challenge > non-L402 header ignored [0.05ms]
+(pass) parse challenge > JSON body challenge [0.14ms]
+(pass) fetchWithL402 > pays the invoice and replays with authorization [1.75ms]
+(pass) fetchWithL402 > non-402 passes through untouched [0.26ms]
+
+src/intent-store.test.ts:
+(pass) intent identity > an intent id is cryptographically unique, not a counter [352.68ms]
+(pass) intent identity > the order hash is canonical: key order does not matter, content does [0.44ms]
+(pass) binding: one intent id may not be re-used for a different thing > every bound field is checked, and every mismatch is refused [5.07ms]
+(pass) binding: one intent id may not be re-used for a different thing > the identical binding is not a conflict [0.27ms]
+(pass) reserve: awaiting_payment -> settled_reserved, exactly once > memory store: one winner, the next attempt loses [0.41ms]
+(pass) reserve: awaiting_payment -> settled_reserved, exactly once > sqlite store: one winner, the next attempt loses [407.87ms]
+(pass) reserve: awaiting_payment -> settled_reserved, exactly once > an unknown intent is reported as missing, not as a win [245.84ms]
+(pass) reserve: awaiting_payment -> settled_reserved, exactly once > two independent connections to the same file: one winner only [384.81ms]
+(pass) reserve: awaiting_payment -> settled_reserved, exactly once > a terminal intent cannot be resurrected by a reserve [244.09ms]
+(pass) the proof-reuse barrier is durable > one proof cannot settle two intents [0.48ms]
+(pass) the proof-reuse barrier is durable > a restart does not restore a consumed proof or an unconsumed-looking intent [214.47ms]
+
+src/proof-store.test.ts:
+(pass) MemoryProofStore > add/sum/all/remove round-trip [2.09ms]
+(pass) MemoryProofStore > add is idempotent per secret [8.06ms]
+(pass) SqliteProofStore > add/sum/all/remove round-trip [282.11ms]
+(pass) SqliteProofStore > add is idempotent per secret [149.04ms]
+
+src/openai.test.ts:
+(pass) openai client > chat sends auth and does NOT substitute braces in content [2.77ms]
+(pass) openai client > listModels [0.34ms]
+(pass) openai client > non-2xx throws with detail [0.26ms]
+
+src/orders.test.ts:
+(pass) SqliteOrderStore > createOrGet is idempotent [160.66ms]
+(pass) SqliteOrderStore > update persists status and result [211.79ms]
+(pass) SqliteOrderStore > update on unknown order throws [74.09ms]
+
+src/cashu-wallet.test.ts:
+(pass) CashuLnWallet on the v4 Wallet API > balanceSats sums stored proofs [1.05ms]
+[cashu] melt quote: amount=100 fee=2 needed=102 have=500 (pruned 0 mint-spent)
+[cashu] melt: state=PAID preimage=pre-1 change=1
+(pass) CashuLnWallet on the v4 Wallet API > payInvoice melts and returns the preimage [4.36ms]
+[cashu] melt quote: amount=100 fee=2 needed=102 have=10 (pruned 0 mint-spent)
+(pass) CashuLnWallet on the v4 Wallet API > payInvoice refuses when balance is short [0.83ms]
+[cashu] melt quote: amount=100 fee=2 needed=102 have=500 (pruned 0 mint-spent)
+[cashu] melt: state=PAID preimage=null change=1
+(pass) CashuLnWallet on the v4 Wallet API > payInvoice errors when the mint returns no preimage [0.59ms]
+[cashu] melt quote: amount=100 fee=2 needed=102 have=500 (pruned 0 mint-spent)
+[cashu] melt: state=PAID preimage=pre-1 change=1
+(pass) CashuLnWallet on the v4 Wallet API > payInvoice stores v4 change with numeric amounts (no Amount objects in the store) [0.52ms]
+(pass) CashuLnWallet on the v4 Wallet API > makeInvoice returns a BOLT11 and payment hash [0.78ms]
+(pass) CashuLnWallet on the v4 Wallet API > fund mints and credits numeric-amount proofs [2.21ms]
+[cashu] melt quote: amount=100 fee=2 needed=102 have=308 (pruned 2 mint-spent)
+[cashu] melt: state=PAID preimage=pre-1 change=1
+(pass) CashuLnWallet on the v4 Wallet API > payInvoice prunes mint-reported SPENT proofs before melting [0.63ms]
+[cashu] melt quote: amount=100 fee=2 needed=102 have=500 (pruned 0 mint-spent)
+[cashu] melt: state=PAID preimage=pre-1 change=1
+(pass) CashuLnWallet on the v4 Wallet API > payInvoice ignores a short NUT-07 answer (nothing pruned from bad evidence) [0.97ms]
+[cashu] NUT-07 state check unavailable: mint does not support NUT-07
+[cashu] melt quote: amount=100 fee=2 needed=102 have=500 (pruned 0 mint-spent)
+[cashu] melt: state=PAID preimage=pre-1 change=1
+(pass) CashuLnWallet on the v4 Wallet API > payInvoice still melts when the NUT-07 check is unavailable (advisory, fail-open) [0.68ms]
+[cashu] melt quote: amount=100 fee=2 needed=102 have=500 (pruned 0 mint-spent)
+[cashu] melt: state=PAID preimage=pre-1 change=1
+(pass) CashuLnWallet on the v4 Wallet API > payInvoice does not treat NUT-07 PENDING as spent [1.74ms]
+[cashu] melt quote: amount=100 fee=2 needed=102 have=0 (pruned 7 mint-spent)
+(pass) CashuLnWallet on the v4 Wallet API > payInvoice refuses when everything is mint-reported SPENT (no melt attempted) [0.69ms]
+[cashu] melt quote: amount=100 fee=2 needed=102 have=500 (pruned 0 mint-spent)
+(pass) CashuLnWallet on the v4 Wallet API > a melt failure (double spend at the mint) leaves the store intact [1.00ms]
+(pass) CashuLnWallet on the v4 Wallet API > fund waits for the mint quote to be PAID [0.62ms]
+
+src/gate-create-race.test.ts:
+(pass) ExplicitGate: an order is CREATED at most once, even with a stale pre-image > a peer's 'no such order' pre-image cannot resurrect a settled order into a second run [288.83ms]
+(pass) ExplicitGate: an order is CREATED at most once, even with a stale pre-image > two racing creators converge on ONE row: the second create returns the first one's row [534.40ms]
+
+src/settlement.test.ts:
+(pass) exactly-once settlement > one sats payment produces exactly one fiat attempt, and a replay re-runs nothing [307.84ms]
+(pass) exactly-once settlement > concurrent callers: exactly one runs, the rest get settlement_in_progress [1.13ms]
+(pass) exactly-once settlement > a downstream failure is TERMINAL: a retry re-throws and never re-runs [366.33ms]
+(pass) binding: a replayed request may not re-enter the adapter > same intent id, different caller/tool/amount/order: refused, no attempt [311.75ms]
+(pass) binding: a replayed request may not re-enter the adapter > a smaller payment cannot fund a bigger intent (the amount is bound) [358.32ms]
+(pass) binding: a replayed request may not re-enter the adapter > the same proof cannot settle two intents [306.04ms]
+(pass) binding: a replayed request may not re-enter the adapter > a refused proof does not leak the proof itself into the intent table [295.08ms]
+(pass) restart safety > a restart does not restore a consumed intent [284.12ms]
+(pass) restart safety > a crash mid-action leaves a reserved intent that is NOT retryable [511.45ms]
+(pass) settled means a processor-confirmed FINAL receipt > a cashu token that was only DECODED is not settled [214.67ms]
+(pass) settled means a processor-confirmed FINAL receipt > a cashu token the mint reports SPENT is settled [0.29ms]
+(pass) settled means a processor-confirmed FINAL receipt > lightning needs the preimage that hashes to the payment hash [2.61ms]
+(pass) settled means a processor-confirmed FINAL receipt > an underpaid or wrong-processor receipt is refused, not rounded [13.98ms]
+(pass) settled means a processor-confirmed FINAL receipt > a terminal refund is never re-run [321.36ms]
+
+src/cashu.test.ts:
+(pass) CashuProcessor > invoice names the mint and amount [10.81ms]
+(pass) CashuProcessor > verify is false without a proof [0.38ms]
+[cashu] redeemed 10 sats (need 10)
+(pass) CashuProcessor > verify true when redeemed >= price [0.22ms]
+[cashu] redeemed 5 sats (need 10)
+(pass) CashuProcessor > verify false when underpaid [2.84ms]
+[cashu] redeem failed: already spent
+(pass) CashuProcessor > verify false when redemption fails (double spend) [0.34ms]
+(pass) CashuMintRedeemer on the v4 Wallet API > credits the token face value after one swap [7.46ms]
+(pass) CashuMintRedeemer on the v4 Wallet API > decodes once per redemption and reuses one wallet [0.35ms]
+(pass) CashuMintRedeemer on the v4 Wallet API > refuses a token from another mint without swapping [3.98ms]
+(pass) CashuMintRedeemer on the v4 Wallet API > normalises mint URLs before comparing (trailing slash, host case) [1.15ms]
+(pass) CashuMintRedeemer on the v4 Wallet API > refuses a mint-reported spend (NUT-07 SPENT) before swapping [0.34ms]
+(pass) CashuMintRedeemer on the v4 Wallet API > does not treat NUT-07 PENDING as a spend [1.04ms]
+[cashu] NUT-07 state check unavailable: mint does not support NUT-07
+(pass) CashuMintRedeemer on the v4 Wallet API > still swaps when the NUT-07 check is unavailable [1.55ms]
+(pass) CashuMintRedeemer on the v4 Wallet API > propagates a swap failure (double spend at the mint) [0.25ms]
+[cashu] redeem failed: token already spent (NUT-07 SPENT for Y-secret-0)
+(pass) CashuMintRedeemer on the v4 Wallet API > verify() is false when the mint reports the proofs spent [0.26ms]
+[cashu] redeemed 10 sats (need 10)
+(pass) CashuMintRedeemer on the v4 Wallet API > verify() is true when a valid token swaps at the mint [1.38ms]
+
+src/reseller.test.ts:
+(pass) Treasury > allows spend above the floor [2.11ms]
+(pass) Treasury > refuses spend that would breach the floor [0.26ms]
+(pass) Treasury > reconciliation counters [0.11ms]
+
+src/refusals.test.ts:
+(pass) refusal catalogue > every refusal has a reason, remedy and negative code [0.44ms]
+(pass) refusal catalogue > catalogue codes match the thrown errors [0.25ms]
+(pass) refusal catalogue > refuse throws with reason + remedy [0.26ms]
+
+src/lnwallet.test.ts:
+(pass) invoiceAmountSats > parses multipliers [0.11ms]
+(pass) invoiceAmountSats > amountless returns null [0.09ms]
+(pass) FakeLnWallet > payInvoice debits balance and returns a preimage [0.21ms]
+(pass) FakeLnWallet > insufficient balance throws [0.18ms]
+
+src/money_safety.test.ts:
+(pass) ExplicitGate money safety > a failed run is terminal: a retry never re-runs the tool [3.17ms]
+(pass) ExplicitGate money safety > an unrecognised order status is refused, never run [0.42ms]
+(pass) ExplicitGate money safety > a legacy `paid` row is refused as an unverifiable state [0.23ms]
+(pass) ExplicitGate money safety > a void tool (run() returns undefined) still replays from the cache [3182.85ms]
+(pass) ExplicitGate money safety > concurrent calls run the tool exactly once [26.92ms]
+(pass) ExplicitGate money safety > a settled order replays its cached result without re-running [0.37ms]
+(pass) ExplicitGate money safety > an unpaid order raises PaymentRequiredError and never runs [0.23ms]
+(pass) SqliteGateStore money safety > claim is compare-and-set on the order status [660.88ms]
+(pass) SqliteGateStore money safety > claim is compare-and-set across independent connections [252.17ms]
+(pass) SqliteGateStore money safety > a failed run stays terminal ACROSS A RESTART, with its reason recorded [385.56ms]
+(pass) SqliteGateStore money safety > lock contention busy-waits and then claims cleanly, never throwing raw SQLITE_BUSY [2553.36ms]
+(pass) SqliteGateStore money safety > an existing pre-fix database is migrated, not left column-less [408.03ms]
+(pass) SqliteGateStore money safety > a replayed proof does not re-run the tool after a restart [1992.51ms]
+(pass) SqliteGateStore money safety > exactly one truly concurrent caller wins the claim [9076.54ms]
+
+src/pricing.test.ts:
+(pass) margin math > markup 0.25 shows 20% margin [1.15ms]
+(pass) margin math > 21% displayed margin requires markup ~0.2658 [0.09ms]
+(pass) margin math > rejects out-of-range margin [0.10ms]
+(pass) costToClient > applies markup and rounds up [0.14ms]
+(pass) costToClient > honours the min price floor [0.04ms]
+(pass) costToClient > honours a ceiling [0.04ms]
+(pass) costToClient > rounding to 5 sats [0.03ms]
+
+src/gate-store.test.ts:
+(pass) SqliteGateStore > put/get round-trips invoice and result [354.38ms]
+(pass) SqliteGateStore > upsert updates status without losing invoice [603.33ms]
+(pass) SqliteGateStore > missing order returns undefined [202.44ms]
+
+src/concurrency.test.ts:
+(pass) ConcurrencyLimiter > serializes above max [31.18ms]
+(pass) ConcurrencyLimiter > runs up to max concurrently [42.08ms]
+(pass) ConcurrencyLimiter > queue timeout fails closed [200.64ms]
+(pass) ConcurrencyLimiter > stats [0.16ms]
+
+src/announce.test.ts:
+(pass) computeTier > empty fields → none [0.14ms]
+(pass) computeTier > email → contact [0.05ms]
+(pass) computeTier > max wins [0.08ms]
+(pass) computeTier > unknown field fails loud [0.18ms]
+(pass) announcementTags > publishes class, d, cap and no g [0.48ms]
+(pass) announcementTags > does not invent a tier when appetite is unknown [0.11ms]
+(pass) the tier is COMPUTED, never supplied > a caller-supplied tier is ignored: the recomputed tier is emitted [0.14ms]
+
+src/transport.test.ts:
+(pass) secretKeyFrom > accepts 64 hex chars [0.15ms]
+(pass) secretKeyFrom > rejects nsec [0.11ms]
+(pass) secretKeyFrom > rejects short hex [0.06ms]
+(pass) handleRpc > tools/list [2.01ms]
+(pass) handleRpc > tools/call returns JSON text content [0.72ms]
+(pass) handleRpc > unknown tool is a JSON-RPC error [0.86ms]
+(pass) handleRpc > PaymentRequiredError becomes a payment_required error [1.16ms]
+(pass) handleRpc > notification (no id) yields no response [0.64ms]
+(pass) relay close: onclose must survive every reasons shape > nostr-tools 2.25.2 string reason does not throw [1.32ms]
+(pass) relay close: onclose must survive every reasons shape > CloseEvent-like object (no .join) does not throw [0.70ms]
+(pass) relay close: onclose must survive every reasons shape > undefined reasons (relay-level onclose, no args) does not throw [0.48ms]
+(pass) relay close: onclose must survive every reasons shape > the close is logged, so a closed relay is observable in journalctl [0.59ms]
+(pass) publish: a never-answering relay must not starve a healthy one > publish() delivers to the healthy relay despite a stuck sibling [32.88ms]
+(pass) publish: a never-answering relay must not starve a healthy one > sendGiftWrapped delivers to the healthy relay despite a stuck sibling [45.90ms]
+(pass) publish: a never-answering relay must not starve a healthy one > a rejecting publish is logged, not thrown (both paths) [17.97ms]
+(pass) publish: a never-answering relay must not starve a healthy one > a SYNCHRONOUSLY-throwing publish is caught and does not starve the sibling (both paths) [15.25ms]
+
+src/http.test.ts:
+(pass) callHttp > substitutes url, query and body [0.80ms]
+(pass) callHttp > pick reads dot paths [0.49ms]
+
+src/cashu-wallet.integration.test.ts:
+(skip) CashuLnWallet live integration > fund, makeInvoice, melt (payInvoice)
+
+src/treasury-env.test.ts:
+(pass) walletFromEnv — no substitute in production > no NWC_URL -> no wallet at all, never a FakeLnWallet [0.10ms]
+(pass) walletFromEnv — no substitute in production > empty-string NWC_URL is unconfigured, not a parse error [0.04ms]
+(pass) walletFromEnv — no substitute in production > whitespace NWC_URL is unconfigured [0.03ms]
+(pass) walletFromEnv — no substitute in production > NWC_URL set -> NwcLnWallet, real=true [0.32ms]
+(pass) unconfigured treasury — honest refusal, no fabricated numbers > balanceSats refuses rail_unavailable instead of inventing a number [0.32ms]
+(pass) unconfigured treasury — honest refusal, no fabricated numbers > canSpend refuses rail_unavailable (never a false 'cannot afford') [0.19ms]
+(pass) unconfigured treasury — honest refusal, no fabricated numbers > assertCanSpend refuses rail_unavailable before any upstream order is paid [0.16ms]
+(pass) unconfigured treasury — honest refusal, no fabricated numbers > a configured treasury still behaves as before (regression guard) [0.20ms]
+
+src/payment.test.ts:
+(pass) parseCapTags > reads cap tags [0.13ms]
+(pass) ExplicitGate > refuses unpaid with payment_required [0.72ms]
+(pass) ExplicitGate > runs once when paid, then caches on replay [0.32ms]
+
+src/ratelimit.test.ts:
+(pass) RateLimiter > allows up to capacity then refuses [0.23ms]
+(pass) RateLimiter > refills over time [0.05ms]
+(pass) RateLimiter > keys are independent [0.05ms]
+(pass) RateLimiter > assert throws RateLimitError with retry info [1.56ms]
+
+src/escalation.test.ts:
+(pass) raising an escalation > a terminal failure notifies the OPERATOR once, with every required fact [1702.12ms]
+(pass) raising an escalation > the escalation DM carries no card material, and card-shaped payloads are refused [729.36ms]
+(pass) raising an escalation > the durable record is the barrier: a second raise never sends a second DM [1079.23ms]
+(pass) raising an escalation > the barrier survives a restart [4579.43ms]
+(pass) raising an escalation > the record is durable BEFORE the send, so a failed relay cannot lose it [620.89ms]
+(pass) replies are durable-state inputs > "refunded" moves the intent to the terminal refunded state [764.41ms]
+(pass) replies are durable-state inputs > NO reply can re-arm an intent [5481.27ms]
+(pass) replies are durable-state inputs > an UNAUTHORIZED reply is recorded but changes nothing (a customer cannot resolve their own escalation) [5207.90ms]
+(pass) replies are durable-state inputs > the operator is never used as its own customer thread [825.63ms]
+(pass) replies are durable-state inputs > "refunded" does NOT overwrite an intent that actually settled [1503.75ms]
+(pass) bounded window > an unresolved escalation past the window raises an alert, exactly once [5442.78ms]
+(pass) bounded window > a resolved escalation is never alerted [3632.47ms]
+(pass) bounded window > a failing customer thread does not block or undo the operator DM [1674.92ms]
+(pass) the real Nostr sink > gift-wraps a NIP-44 DM to the recipient and signs with the CVM key [3075.80ms]
+(pass) the real Nostr sink > the sink refuses card-shaped text before it can be encrypted and sent [72.85ms]
+(pass) the real Nostr sink > the operator can DECRYPT the DM, and it is signed by the CVM (the CVM is the actor) [519.72ms]
+
+services/_shared/start.test.ts:
+(pass) deployed commit/ref resolution > prefers the CVM_COMMIT env override [4.12ms]
+(pass) deployed commit/ref resolution > returns undefined when no env var and no marker file [5.32ms]
+(pass) deployed commit/ref resolution > falls back to the repo-root .deployed-sha marker when present [6.76ms]
+
+services/_shared/wallet.test.ts:
+(pass) makeWallet > auto-selects fake when nothing is configured [2.72ms]
+(pass) makeWallet > auto-selects nwc from NWC_URL [7.13ms]
+(pass) makeWallet > auto-selects cashu from mint + seed [25.38ms]
+(pass) makeWallet > explicit backend validates required secrets [0.49ms]
+(pass) makeWallet > unknown backend throws [0.49ms]
+
+services/_shared/health.test.ts:
+(pass) buildHealthBody > includes commit and ref when provided [10.24ms]
+(pass) buildHealthBody > omits commit/ref when absent (legacy deploys report no SHA) [0.50ms]
+(pass) buildHealthBody > merges the per-service report fields [0.26ms]
+(pass) buildHealthBody > does not let a report field clobber the commit [0.06ms]
+
+services/_shared/mock-l402.test.ts:
+(pass) mock L402 upstream > fetchWithL402 pays the challenge and replays [106.45ms]
+(pass) mock L402 upstream > full create_sms_order flow against the mock returns the code [3296.57ms]
+
+services/_shared/ai.test.ts:
+(pass) buildAiTools > paid chat returns the completion [18.28ms]
+(pass) buildAiTools > unpaid chat is refused [11.74ms]
+(pass) buildAiTools > free tool (price 0) runs without payment [3.90ms]
+(pass) buildAiTools > missing prompt/messages errors [11.04ms]
+
+services/cvm-lambda/src/adapter.test.ts:
+(pass) executeOnAdapter > collects stdout/stderr and exit code [62.75ms]
+(pass) executeOnAdapter > adapter error rejects [74.18ms]
+
+services/cvm-lambda/src/languages.test.ts:
+(pass) resolveLanguage > python3 wraps via stdin [0.10ms]
+(pass) resolveLanguage > go sets an offline env [0.05ms]
+(pass) resolveLanguage > rustc compiles and runs [0.03ms]
+(pass) resolveLanguage > unknown language fails loud [0.13ms]
+
+services/cvm-sms4sats/src/tools.test.ts:
+(pass) create_sms_order > paid: pays upstream, returns the code, order fulfilled [1038.97ms]
+(pass) create_sms_order > unpaid: payment_required, upstream untouched, order pending [185.84ms]
+(pass) create_sms_order > sends type + refundInvoice (+ duration) to the upstream [540.79ms]
+(pass) create_sms_order > min-price floor is applied to the client price [306.91ms]
+(pass) availability > flags low treasury [89.00ms]
+
+services/cvm-sms4sats/src/wallet.test.ts:
+(pass) (a) unconfigured wallet — the paid path refuses rail_unavailable > create_sms_order refuses rail_unavailable BEFORE minting any order [6.00ms]
+(pass) (a) unconfigured wallet — the paid path refuses rail_unavailable > an unconfigured service mints NO order (nothing half-sold) [2.22ms]
+(pass) (a) unconfigured wallet — the paid path refuses rail_unavailable > control: the same upstream DOES mint when the rail is configured [5.32ms]
+(pass) (b) availability does not invent a balance > no wallet -> rail_unavailable status, NO treasury_balance_sats key [3.36ms]
+(pass) (b) availability does not invent a balance > the health payload builder never states a fabricated balance [4.16ms]
+(pass) (c) configured wallet — the real balance is stated > availability reports the wallet's real balance [0.82ms]
+(pass) (c) configured wallet — the real balance is stated > low real balance is reported as low_treasury, still the real number [1.77ms]
+
+services/cvm-sms4sats/src/upstream.test.ts:
+(pass) Sms4SatsClient > services passthrough [2.14ms]
+(pass) Sms4SatsClient > requestOrder captures 402 challenge without paying [0.92ms]
+(pass) Sms4SatsClient > payAndPoll pays then polls to terminal [3.24ms]
+
+services/cvm-sms4sats/src/gate-durability.test.ts:
+(pass) cvm-sms4sats gate store wiring > CONTROL: an in-memory gate store really does lose settlement across a restart [0.50ms]
+(pass) cvm-sms4sats gate store wiring > buildGate gives the gate a durable store: a replay after restart never re-runs [500.05ms]
+(pass) cvm-sms4sats gate store wiring > the gate database defaults into the service state dir and honours GATE_DB [0.65ms]
+
+services/cvm-sms4sats/src/gate-process.test.ts:
+(pass) cvm-sms4sats gate: cross-process settlement > CONTROL: two service PROCESSES on the pre-fix no-store wiring both send (one payment, two SMS) [1651.63ms]
+(pass) cvm-sms4sats gate: cross-process settlement > one payment, one SMS send across two INDEPENDENT service processes (durable wiring) [1524.56ms]
+(pass) cvm-sms4sats gate: cross-process settlement > an order another PROCESS already claimed is refused; an already-settled one replays - neither sends [1571.11ms]
+(pass) cvm-sms4sats gate: cross-process settlement > restart durability through the service wiring: settled state and a terminal failure's reason survive a FRESH handle [2917.24ms]
+
+services/cvm-2fiat/src/escalation-wiring.test.ts:
+(pass) the CVM escalates to its OWNER_NPUB_HEX > a failed fiat leg after settled sats DMs the operator, readable and signed by the CVM [2338.57ms]
+(pass) the CVM escalates to its OWNER_NPUB_HEX > the payer gets a subordinate thread, and its failure cannot change the operator DM [2410.23ms]
+(pass) the CVM escalates to its OWNER_NPUB_HEX > a CUSTOMER reply cannot resolve the operator's escalation [3211.67ms]
+(pass) the CVM escalates to its OWNER_NPUB_HEX > no escalation ever carries card material [888.58ms]
+(pass) the CVM escalates to its OWNER_NPUB_HEX > a retry of the failed intent is refused and never escalates twice [9718.94ms]
+(pass) the CVM escalates to its OWNER_NPUB_HEX > the escalation barrier is on disk, not in an in-memory cache [1488.62ms]
+(pass) operator replies and the bounded window > "refunded" from the operator moves the intent to a TERMINAL refunded state [5380.43ms]
+(pass) operator replies and the bounded window > an unresolved escalation past the window alerts the operator, exactly once [1404.02ms]
+
+services/cvm-2fiat/src/hygiene.test.ts:
+(pass) cvm-2fiat hygiene > the refusal list names every refused capability [0.09ms]
+(pass) cvm-2fiat hygiene > no tool response contains PAN-, CVV- or token-shaped material [4.45ms]
+(pass) cvm-2fiat hygiene > redactCardMaterial strips credential shapes from arbitrary text [0.53ms]
+(pass) cvm-2fiat card.balance > refuses a non-owner pubkey BEFORE any adapter work [0.96ms]
+(pass) cvm-2fiat card.balance > an UNPAID caller never reaches the adapter path [0.52ms]
+(pass) cvm-2fiat card.balance > owner reads balance through the adapter (paid path settled) [0.58ms]
+(pass) cvm-2fiat card.balance > when the adapter is unconfigured, the tool refuses rail_unavailable, never fabricates [0.32ms]
+(pass) cvm-2fiat payment.quote > returns the own-card hand-off instructions for a valid checkout URL [0.24ms]
+(pass) cvm-2fiat payment.quote > refuses a non-https, non-checkout URL [0.46ms]
+(pass) cvm-2fiat docs + rail_info > docs serves the contract verbatim, and it carries the refusal list [0.44ms]
+(pass) cvm-2fiat docs + rail_info > rail_info says what the rail is NOT [0.89ms]
+(pass) cvm-2fiat announcement > the announced content carries the refusal list; no tier tag for a field-less service [0.20ms]
+
+1 tests skipped:
+(skip) CashuLnWallet live integration > fund, makeInvoice, melt (payInvoice)
+
+ 231 pass
+ 1 skip
+ 0 fail
+ 10713 expect() calls
+Ran 232 tests across 38 files. [107.78s]
+
+BUN-TEST VERDICT: PASS rc=0 Ran 232 tests across 38 files. [107.78s] [108s]
