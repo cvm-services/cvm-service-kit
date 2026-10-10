@@ -1,0 +1,67 @@
+bun test v1.4.2 (744846f84)
+
+services/cvm-sms4sats/src/gate-durability.test.ts:
+(pass) cvm-sms4sats gate store wiring > CONTROL: an in-memory gate store really does lose settlement across a restart [119.63ms]
+88 |     const gate2 = buildGate(new FakeProcessor(), db);
+89 |     const second = async () => {
+90 |       runs++;
+91 |       return "sent-2";
+92 |     };
+93 |     expect(await gate2.gate(gateArgs("dur", second))).toBe("sent-1");
+                                                           ^
+error: expect(received).toBe(expected)
+
+Expected: "sent-1"
+Received: "sent-2"
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_936c2a0f/services/cvm-sms4sats/src/gate-durability.test.ts:93:55)
+(fail) cvm-sms4sats gate store wiring > buildGate gives the gate a durable store: a replay after restart never re-runs [282.44ms]
+(pass) cvm-sms4sats gate store wiring > the gate database defaults into the service state dir and honours GATE_DB [0.48ms]
+
+services/cvm-sms4sats/src/gate-process.test.ts:
+(pass) cvm-sms4sats gate: cross-process settlement > CONTROL: two service PROCESSES on the pre-fix no-store wiring both send (one payment, two SMS) [977.26ms]
+177 |       expect(describeRuns([a, b])).toContain("rc=0");
+178 |       expect(a.code).toBe(0);
+179 |       expect(b.code).toBe(0);
+180 | 
+181 |       // THE invariant: exactly one sender for one payment.
+182 |       expect(c.sends().length).toBe(1);
+                                     ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 2
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_936c2a0f/services/cvm-sms4sats/src/gate-process.test.ts:182:32)
+(fail) cvm-sms4sats gate: cross-process settlement > one payment, one SMS send across two INDEPENDENT service processes (durable wiring) [724.76ms]
+205 |         db: claimed.db,
+206 |         orderId: "seeded-claimed",
+207 |         outFile: claimed.outFile,
+208 |         startAt: 0,
+209 |       });
+210 |       expect(describeRuns([r1])).toContain("refused:SettlementInProgressError");
+                                       ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "refused:SettlementInProgressError"
+Received: "#0 rc=0 token=ran stderr="
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_936c2a0f/services/cvm-sms4sats/src/gate-process.test.ts:210:34)
+(fail) cvm-sms4sats gate: cross-process settlement > an order another PROCESS already claimed is refused; an already-settled one replays - neither sends [4263.32ms]
+250 |       expect(runs).toBe(1);
+251 | 
+252 |       // A FRESH handle - a new connection the service did not hand out - must see
+253 |       // the terminal state. This is what a restart looks like from SQLite's side.
+254 |       const fresh1 = new SqliteGateStore(c.db);
+255 |       expect(fresh1.get("restart-ok")!.status).toBe("settled");
+                                          ^
+TypeError: undefined is not an object (evaluating 'fresh1.get("restart-ok").status')
+      at <anonymous> (/home/c03rad0r/worktrees/t_936c2a0f/services/cvm-sms4sats/src/gate-process.test.ts:255:37)
+(fail) cvm-sms4sats gate: cross-process settlement > restart durability through the service wiring: settled state and a terminal failure's reason survive a FRESH handle [2361.99ms]
+
+ 3 pass
+ 4 fail
+ 17 expect() calls
+Ran 7 tests across 2 files. [15.64s]
+
+BUN-TEST VERDICT: FAIL rc=1 Ran 7 tests across 2 files. [15.64s] [17s]

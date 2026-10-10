@@ -1,0 +1,16 @@
+### determinism: 3 independent rounds of the cross-process file (durable wiring)
+--- round 1
+ 4 pass
+ 0 fail
+Ran 4 tests across 1 file. [18.60s]
+BUN-TEST VERDICT: PASS rc=0 Ran 4 tests across 1 file. [18.60s] [20s]
+--- round 2
+ 4 pass
+ 0 fail
+Ran 4 tests across 1 file. [17.55s]
+BUN-TEST VERDICT: PASS rc=0 Ran 4 tests across 1 file. [17.55s] [18s]
+--- round 3
+ 4 pass
+ 0 fail
+Ran 4 tests across 1 file. [13.65s]
+BUN-TEST VERDICT: PASS rc=0 Ran 4 tests across 1 file. [13.65s] [13s]
