@@ -47,3 +47,26 @@ describe("announcementTags", () => {
     expect(tags.some((t) => t[0] === "t" && t[1].startsWith("cvm:tier:"))).toBe(false);
   });
 });
+
+describe("the tier is COMPUTED, never supplied", () => {
+  // A caller that could pass its own tier could understate what the service
+  // collects (CEP-draft-0001 P15): this is the one lie a reader cannot detect,
+  // because the reader recomputes from the same declared fields. The type must
+  // not be able to express a tier, and the emitter must not read one.
+  test("a caller-supplied tier is ignored: the recomputed tier is emitted", () => {
+    const tags = announcementTags(
+      {
+        d: "lie-01",
+        serviceClass: "compute",
+        requiredInputs: ["email"],
+        // @ts-expect-error tier is not part of the announce vocabulary — the emitter computes it
+        tier: "none",
+      },
+      serverInfo,
+    );
+    const has = (n: string, v: string) => tags.some((t) => t[0] === n && t[1] === v);
+    // email recomputes to contact; the supplied "none" must not appear
+    expect(has("t", "cvm:tier:contact")).toBe(true);
+    expect(has("t", "cvm:tier:none")).toBe(false);
+  });
+});

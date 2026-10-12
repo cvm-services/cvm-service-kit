@@ -1,0 +1,19 @@
+scenario 1: order o-1 settled with proof token-A
+  first call (token-A): RETURNED "paid-result"
+  replay with a DIFFERENT proof (token-B)
+    RETURNED  "paid-result"
+  replay with NO proof at all
+    RETURNED  "paid-result"
+  replay with a VALID proof that paid ANOTHER order (token-C)
+    RETURNED  "paid-result"
+scenario 2: order o-2 settled with proof token-A, then a valid-but-other-order token
+  replay of o-2 with token-C (valid, but paid o-3)
+    RETURNED  "paid-result"
+scenario 3: order o-4 settled by an invoice (no client proof presented)
+  first call (no proof): RETURNED "paid-result"
+  replay of a no-proof order WITH a proof attached
+    RETURNED  "paid-result"
+  replay of a no-proof order with no proof
+    RETURNED  "paid-result"
+
+proof hash of token-A: ee718602fc38, token-B: 17c2b2ba08f8, token-C: 3fca7dd7f642

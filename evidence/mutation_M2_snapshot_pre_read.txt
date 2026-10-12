@@ -1,0 +1,39 @@
+# MUTATION M2: claim decides from a lazily-primed read, UPDATE unguarded (TOCTOU shape)
+# file: mut/src/gate-store.ts (copy of the fixed tree, one mutation applied)
+# command: bun test src/money_safety.test.ts
+
+bun test v1.4.2 (744846f84)
+
+src/money_safety.test.ts:
+(pass) ExplicitGate money safety > a failed run is terminal: a retry never re-runs the tool [1.67ms]
+(pass) ExplicitGate money safety > an unrecognised order status is refused, never run [0.38ms]
+(pass) ExplicitGate money safety > a legacy `paid` row is refused as an unverifiable state [0.23ms]
+(pass) ExplicitGate money safety > concurrent calls run the tool exactly once [25.83ms]
+(pass) ExplicitGate money safety > a settled order replays its cached result without re-running [0.29ms]
+(pass) ExplicitGate money safety > an unpaid order raises PaymentRequiredError and never runs [0.24ms]
+(pass) SqliteGateStore money safety > claim is compare-and-set on the order status [562.73ms]
+(pass) SqliteGateStore money safety > claim is compare-and-set across independent connections [293.30ms]
+(pass) SqliteGateStore money safety > a failed run stays terminal ACROSS A RESTART, with its reason recorded [303.39ms]
+(pass) SqliteGateStore money safety > a concurrent writer makes claim lose the CAS, not throw a raw SQLite error [1322.06ms]
+(pass) SqliteGateStore money safety > an existing pre-fix database is migrated, not left column-less [942.80ms]
+(pass) SqliteGateStore money safety > a replayed proof does not re-run the tool after a restart [267.48ms]
+461 |         await Promise.all(procs.map((p) => p.exited));
+462 |       }
+463 | 
+464 |       // Exactly one caller takes the transition. Two or more is the double spend
+465 |       // this fix exists to prevent.
+466 |       expect(outcomes.filter((o) => o === "won").length).toBe(1);
+                                                               ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 2
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_e19ad2e9/mut/src/money_safety.test.ts:466:58)
+(fail) SqliteGateStore money safety > exactly one truly concurrent caller wins the claim [530.47ms]
+
+ 12 pass
+ 1 fail
+ 54 expect() calls
+Ran 13 tests across 1 file. [4.27s]
+# measured: 13 pass / 0 fail -> NOT caught

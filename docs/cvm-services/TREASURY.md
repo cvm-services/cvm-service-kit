@@ -16,7 +16,7 @@ with `CDK_MINTD_LN_BACKEND=fakewallet`; the rest are testnut). So we need:
 
 ## Locked decisions
 
-- Cashu backend: **in-process cashu-ts v2 + SQLite proof store**, dedicated
+- Cashu backend: **in-process cashu-ts v4 + SQLite proof store**, dedicated
   seed/DB (not the shared `ours` wallet).
 - Mock harness treasury: **FakeLnWallet** (flow proof); CashuLnWallet validated
   separately against the mint.
@@ -26,7 +26,10 @@ with `CDK_MINTD_LN_BACKEND=fakewallet`; the rest are testnut). So we need:
 
 ## Part A — `CashuLnWallet` (`src/cashu-wallet.ts`)
 
-`class CashuLnWallet implements LnWallet` over cashu-ts v2:
+`class CashuLnWallet implements LnWallet` over cashu-ts v4 (`Wallet`,
+`createMeltQuoteBolt11`/`meltProofsBolt11`, `createMintQuoteBolt11`; an
+advisory NUT-07 `checkProofsStates` prunes mint-spent proofs before a melt,
+the melt itself stays authoritative):
 
 - `payInvoice(bolt11)`: `createMeltQuote` → pick proofs from store → `meltProofs`
   → persist change → return `{ preimage, feeSats }` (preimage is required for L402).
@@ -138,20 +141,18 @@ invoice. `create_sms_order` now takes `type` (`receive-sms` | `rent-number`),
 `duration_minutes`, and requires `refund_invoice`.
 
 ## Open verification
-- [x] cashu-ts v2 melt preimage field → `MeltProofsResponse.quote.payment_preimage`
+- [x] cashu-ts v4 melt preimage field → `MeltProofsResponse.quote.payment_preimage`
 - [x] proof-store API shape → custom (SQLite) store
 - [x] fakewallet melt preimage → testnut (Nutshell FakeWallet) returns a real
       preimage on melt → a fakewallet mint can settle the L402 handshake
 
-## Finding — mint compatibility (cashu-ts v2)
-`cashu-ts@2.9.0` **cannot verify cdk-mintd keysets** ("Couldn't verify keyset
-ID"): `mint.minibits.cash/Bitcoin` and `mint.orangesync.tech` both fail to load.
-Nutshell-family mints load fine: `testnut.cashu.exchange`,
-`mint.cubabitcoin.org`. So:
-- Free mechanics/integration tests use `testnut.cashu.exchange`.
-- A **real-ecash treasury** should use a Nutshell mint (e.g. Cuba Bitcoin) until
-  we move to a cashu-ts that verifies cdk keysets (v3+), or the fleet mint is
-  changed. NWC remains the fastest real path.
+## Finding — mint compatibility (cashu-ts v2, superseded by the v4 port)
+~~`cashu-ts@2.9.0` **cannot verify cdk-mintd keysets** ("Couldn't verify keyset
+ID"): `mint.minibits.cash/Bitcoin` and `mint.orangesync.tech` both fail to load.~~
+**Resolved by the v4 port** (2026-10-08, `@cashu/cashu-ts@4.11.0`): the v4
+client loads `mint.orangesync.tech` (cdk-mintd) and `testnut.cashu.exchange`
+alike — verified live from this repo. A real-ecash treasury is no longer
+restricted to Nutshell-family mints; NWC remains the fastest real path.
 
 ## Notes
 - nanogpt/ppq `-health.timer` units report failed while `status=unconfigured`

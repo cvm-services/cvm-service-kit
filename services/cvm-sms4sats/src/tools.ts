@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   costToClient,
+  refuse,
   type ExplicitGate,
   type LnWallet,
   type OrderStore,
@@ -12,12 +13,15 @@ import type { Sms4SatsClient } from "./upstream.ts";
 
 export interface SmsDeps {
   client: Sms4SatsClient;
-  wallet: LnWallet;
+  /** Real wallet, or undefined when the treasury rail is not configured. */
+  wallet?: LnWallet;
   treasury: Treasury;
   orders: OrderStore;
   pricing: PricingConfig;
   /** Omit to run in free mode (no client payment gate). */
   gate?: ExplicitGate;
+  /** Which wallet rail this host expects ("nwc"). Stated in refusals. */
+  rail?: "nwc";
   poll?: { intervalMs?: number; attempts?: number };
 }
 
@@ -26,6 +30,25 @@ function deriveOrderId(caller: string, args: Record<string, unknown>): string {
     .update(`${caller}\n${args.country}\n${args.service}\n${args.type ?? "receive-sms"}`)
     .digest("hex")
     .slice(0, 32);
+}
+
+/**
+ * Health/availability payload for the treasury. States a balance ONLY when a
+ * real wallet answered; with no rail configured it reports rail_unavailable
+ * and no treasury_balance_sats key is emitted (never a fabricated number).
+ */
+export async function treasuryHealthReport(
+  treasury: Treasury,
+  minPriceSats: number,
+  rail: "nwc" = "nwc",
+): Promise<{ status: string; rail?: string; treasury_balance_sats?: number }> {
+  if (!treasury.railConfigured) {
+    return { status: "rail_unavailable", rail };
+  }
+  return {
+    status: (await treasury.canSpend(minPriceSats)) ? "ok" : "low_treasury",
+    treasury_balance_sats: await treasury.balanceSats(),
+  };
 }
 
 export function buildSmsTools(d: SmsDeps): Tool[] {
@@ -39,9 +62,8 @@ export function buildSmsTools(d: SmsDeps): Tool[] {
       inputSchema: { type: "object", properties: {} },
     },
     handler: async () => {
-      const balance = await d.treasury.balanceSats();
-      const ok = await d.treasury.canSpend(d.pricing.minSats);
-      return { status: ok ? "ok" : "low_treasury", treasury_balance_sats: balance };
+      // Same contract as the health endpoint: no fabricated balance.
+      return treasuryHealthReport(d.treasury, d.pricing.minSats, d.rail ?? "nwc");
     },
   };
 
@@ -104,6 +126,13 @@ export function buildSmsTools(d: SmsDeps): Tool[] {
       },
     },
     handler: async (args, ctx) => {
+      // Rail check FIRST: with no wallet configured this tool must refuse
+      // before it mints an upstream order — never half-sell an order it
+      // cannot pay for, never fake the upstream payment.
+      if (!d.treasury.railConfigured) {
+        refuse("rail_unavailable", { rail: d.rail ?? "nwc" });
+      }
+
       const orderId = orderIdFor(ctx.caller, args);
       const type = String(args.type ?? "receive-sms");
       if (typeof args.refund_invoice !== "string" || args.refund_invoice.length === 0) {
@@ -153,7 +182,7 @@ export function buildSmsTools(d: SmsDeps): Tool[] {
         const res = await d.client.payAndPoll(
           upstream.orderId,
           { macaroon: upstream.macaroon, invoice: upstream.invoice },
-          d.wallet,
+          d.wallet!, // railConfigured asserted above, before the order was minted
           d.poll,
         );
         const done = res?.status === "completed" || res?.status === "code_received";

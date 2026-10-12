@@ -1,0 +1,75 @@
+# RED-BEFORE: t_e19ad2e9 money-safety tests vs PRE-FIX product code
+# product code: github/main @ 7958fff49be54c2c1416d39b21d2d7bb8ff57557  (7958fff fix(deploy): repin cvm kit to merged release (#11))
+# test file: src/money_safety.test.ts @ b35b916 (PR #13, before this card's additions)
+# command: bun test src/money_safety.test.ts   (cwd: /home/c03rad0r/worktrees/t_e19ad2e9/red-main)
+# bun 1.4.2, 2026-10-10T05:42:40+02:00
+
+bun test v1.4.2 (744846f84)
+
+src/money_safety.test.ts:
+104 | 
+105 |     await expect(gate.gate(req("o1", boom))).rejects.toThrow("venue refused");
+106 |     // The sats were taken and the venue action failed. A retry must NOT attempt
+107 |     // a second fiat action against the same payment.
+108 |     await expect(gate.gate(req("o1", boom))).rejects.toThrow();
+109 |     expect(runs).toBe(1);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 2
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_e19ad2e9/red-main/src/money_safety.test.ts:109:18)
+(fail) ExplicitGate money safety > a failed run is terminal: a retry never re-runs the tool [1.23ms]
+124 |       gate.gate(req("c1", run)),
+125 |       gate.gate(req("c1", run)),
+126 |     ]);
+127 |     const ok = results.filter((r) => r.status === "fulfilled").length;
+128 | 
+129 |     expect(runs).toBe(1);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 2
+
+      at <anonymous> (/home/c03rad0r/worktrees/t_e19ad2e9/red-main/src/money_safety.test.ts:129:18)
+(fail) ExplicitGate money safety > concurrent calls run the tool exactly once [27.54ms]
+(pass) ExplicitGate money safety > a settled order replays its cached result without re-running [0.34ms]
+(pass) ExplicitGate money safety > an unpaid order raises PaymentRequiredError and never runs [0.28ms]
+178 |   test("claim is compare-and-set on the order status", () => {
+179 |     const { store } = mkStore();
+180 |     store.put(awaitingOrder("x"));
+181 | 
+182 |     // The one transition that hands a single caller the right to act.
+183 |     expect(store.claim("x", "awaiting_payment", "settlement_reserved")).toBe(true);
+                       ^
+TypeError: store.claim is not a function. (In 'store.claim("x", "awaiting_payment", "settlement_reserved")', 'store.claim' is undefined)
+      at <anonymous> (/home/c03rad0r/worktrees/t_e19ad2e9/red-main/src/money_safety.test.ts:183:18)
+(fail) SqliteGateStore money safety > claim is compare-and-set on the order status [158.17ms]
+217 |     const b = new SqliteGateStore(path);
+218 |     a.put(awaitingOrder("y"));
+219 | 
+220 |     // b reads a pre-image BEFORE the winner commits ...
+221 |     expect(b.get("y")!.status).toBe("awaiting_payment");
+222 |     expect(a.claim("y", "awaiting_payment", "settlement_reserved")).toBe(true);
+                   ^
+TypeError: a.claim is not a function. (In 'a.claim("y", "awaiting_payment", "settlement_reserved")', 'a.claim' is undefined)
+      at <anonymous> (/home/c03rad0r/worktrees/t_e19ad2e9/red-main/src/money_safety.test.ts:222:14)
+(fail) SqliteGateStore money safety > claim is compare-and-set across independent connections [147.81ms]
+(pass) SqliteGateStore money safety > a replayed proof does not re-run the tool after a restart [296.20ms]
+275 |       // truth-table and cross-connection tests above are what catch a claim that
+276 |       // drops the `from` guard or answers from a snapshot.
+277 |       const CALLERS = 3;
+278 |       const { store: seed, path } = mkStore();
+279 |       seed.put(awaitingOrder("race"));
+280 |       seed.close();
+                 ^
+TypeError: seed.close is not a function. (In 'seed.close()', 'seed.close' is undefined)
+      at <anonymous> (/home/c03rad0r/worktrees/t_e19ad2e9/red-main/src/money_safety.test.ts:280:12)
+(fail) SqliteGateStore money safety > exactly one truly concurrent caller wins the claim [142.44ms]
+
+ 3 pass
+ 5 fail
+ 14 expect() calls
+Ran 8 tests across 1 file. [792.00ms]

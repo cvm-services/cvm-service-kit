@@ -1,0 +1,14 @@
+== bun run test ==
+1 tests skipped:
+(skip) CashuLnWallet live integration > fund, makeInvoice, melt (payInvoice)
+
+ 172 pass
+ 1 skip
+ 0 fail
+ 430 expect() calls
+Ran 173 tests across 31 files. [16.27s]
+exit=0
+
+== bun run typecheck ==
+$ tsc --noEmit
+exit=0

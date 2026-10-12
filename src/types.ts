@@ -51,6 +51,9 @@ export interface CvmServerOptions {
   tools: Tool[];
   /** Optional explicit announce so tools/list and the 11317 event agree. */
   onLog?: (line: string) => void;
+  /** Per-relay publish deadline in ms (default 10s). A relay whose publish()
+   * never settles is logged and dropped instead of blocking the others. */
+  publishTimeoutMs?: number;
 }
 
 export interface AnnounceOptions {
@@ -72,7 +75,8 @@ export interface AnnounceOptions {
   /** Required input fields (P15). Omit for unknown; use [] to declare none. */
   requiredInputs?: string[];
   optionalInputs?: string[];
-  /** Explicit input tier (none|financial|contact|fulfilment|legal|sensitive).
-   * If omitted it is recomputed from the declared fields. */
-  tier?: string;
+  // NOTE: there is deliberately NO `tier` field. The tier tag is computed from
+  // the declared required/optional inputs (see resolveTier in announce.ts) and
+  // a caller-supplied tier would let a service understate what it collects —
+  // the one lie a reader cannot detect (CEP-draft-0001 P15).
 }

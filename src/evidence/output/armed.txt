@@ -1,0 +1,12 @@
+service log:
+  [cvm-2fiat] no ADAPTER_URL — card.balance will refuse rail_unavailable
+  [cvm-2fiat] connected ws://127.0.0.1:34619
+  [cvm-2fiat] pubkey: 6a04ab98d9e4774ad806e302dddeb63bea16b5cb5f223ee77478e861bb583eb3
+  [cvm-2fiat] escalation armed: operator=68680737c76dabb801cb2204f57dbe4e4579e4f710cd67dc1b4227592c81e9b5, window=86400s, dir=/home/c03rad0r/.tmp/2fiat-arm-HvNmm1
+  [cvm-2fiat] relay closed ws://127.0.0.1:34619: relay connection closed by us
+
+durable tables created by boot:
+  yes /home/c03rad0r/.tmp/2fiat-arm-HvNmm1/intents.sqlite
+  yes /home/c03rad0r/.tmp/2fiat-arm-HvNmm1/escalations.sqlite
+
+PASS: the service armed the escalation against its existing operator key (68680737c76d...) and persisted both tables; no new support npub was introduced.

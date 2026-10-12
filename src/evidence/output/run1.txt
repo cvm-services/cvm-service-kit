@@ -1,0 +1,16 @@
+phase A race:
+  legit-0                                replay
+  legit-1                                replay
+  legit-2                                attempt
+  legit-3                                replay
+phase B conflict:
+  attacker-different-caller-amount       conflict
+phase C duplicate proof:
+  attacker-same-proof-new-intent         proof
+phase D after restart:
+  attacker-same-proof-after-restart      proof
+
+fiat attempts recorded: 1
+  FIAT_ATTEMPT i-race 740876
+
+PASS: one settlement -> exactly one fiat attempt; the mismatched re-use, the duplicate proof (before AND after a restart) were refused with no attempt, and every refused caller was refused BEFORE the action.
