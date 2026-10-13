@@ -110,6 +110,38 @@
           RATE_CAPACITY: "10"
           RATE_REFILL_PER_SEC: "1"
           HEALTH_PORT: "8784"
+      - name: cvm-jlc-quote
+        script: services/jlc-quote/src/server.ts
+        state_dir: /var/lib/cvm-jlc-quote
+        health_port: 8785
+        # ANNOUNCE stays false until the browser leg is proven on the host: a
+        # running service that cannot quote must be INVISIBLE, not advertised.
+        #
+        # This service needs three things the role does not provision, and each
+        # costs real time if missed (see services/jlc-quote/deploy/README.md):
+        #   1. an X server — the quote drives HEADED Chrome: Xvfb :99 -screen 0 1400x1100x24
+        #   2. /usr/bin/google-chrome — Playwright's bundled Chromium is MISSING,
+        #      so the launch must carry this executable_path
+        #   3. a persistent Chrome profile holding the JLCPCB session, plus a way
+        #      to re-login when it expires. Expiry is EXPECTED, and the tool then
+        #      refuses session_expired rather than inventing a price.
+        #
+        # Config names only. The profile is credential-adjacent: a PATH, never a
+        # value, and never a secret in this file.
+        config:
+          RELAYS: "{{ common_relays }}"
+          ANNOUNCE: "false"
+          ANNOUNCE_D: cvm-jlc-quote-01
+          SERVICE_CLASS: pcb-quote
+          PAYMENT_MODE: "none"
+          JLC_DISPLAY: ":99"
+          JLC_CHROME: /usr/bin/google-chrome
+          JLC_PYTHON: "{{ cvm_jlc_python | default('/home/debian/venvs/pw/bin/python') }}"
+          JLC_CLIENT_DIR: "{{ cvm_jlc_client_dir | default('/home/debian/jlcpcb-service') }}"
+          JLC_INPUT_DIR: /var/lib/cvm-jlc-quote/inputs
+          JLC_PROFILE: /var/lib/cvm-jlc-quote/chrome-profile
+          JLC_SNAPSHOT_DIR: /var/lib/cvm-jlc-quote/snapshots
+          HEALTH_PORT: "8785"
   tasks:
     - name: Deploy each wrapper
       ansible.builtin.include_role:
