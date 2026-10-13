@@ -1,0 +1,776 @@
+24
+SMT
+24-hour PCB production. Fast Delivery to United States.
+ Coupons
+ Download APP
+USD 
+JLCPCB
+Products
+Capabilities
+Support 
+About Us 
+Order Now
+Sign In
+Save $20
+
+$20 OFF Your First FPC Order
+Exclusive New Customer Offer
+
+Industrial-grade Heat Resistance (Up to 200°C)
+Superior 85% Light Transmittance for Optics
+Adhesiveless Core & LDl Technology for Precision
+Electronic Component
+
+Skip BOM Headaches
+
+We Source Parts & Assemble
+
+680,000+ in-stock components with smart BOM matching
+100% genuine, traceable from authorized distributors
+Supports pre-order parts with no inventory cost
+
+Journey of Limitless Creativity —
+
+PCB Manufacturing & Assembly
+About JLCPCB
+
+Advanced HDI PCBs
+
+Now Live
+
+Compact Design (Save Space)
+Blind & Buried Via Filling (High Stability)
+Reliable Impedance Control (Signal Integrity)
+Learn more >
+Special offer
+
+
+
+
+$2 PCBs & Exclusive Shipping
+
+Only at JLCONE Desktop
+
+$2 PCBs & exclusive shipping rates only on JLCONE Desktop
+Random Discount on Every Order ($1–$20 OFF)
+Get $104 first-download coupons
+Download & Save More
+Save $20
+
+$20 OFF Your First FPC Order
+Exclusive New Customer Offer
+
+Industrial-grade Heat Resistance (Up to 200°C)
+Superior 85% Light Transmittance for Optics
+Adhesiveless Core & LDl Technology for Precision
+Claim $20 OFF >
+Electronic Component
+
+Skip BOM Headaches
+
+We Source Parts & Assemble
+
+680,000+ in-stock components with smart BOM matching
+100% genuine, traceable from authorized distributors
+Supports pre-order parts with no inventory cost
+Source Parts Now
+
+Journey of Limitless Creativity —
+
+PCB Manufacturing & Assembly
+About JLCPCB
+
+Advanced HDI PCBs
+
+Now Live
+
+Compact Design (Save Space)
+Blind & Buried Via Filling (High Stability)
+Reliable Impedance Control (Signal Integrity)
+2 Layers
+X
+mm
+5 pcs
+Get Instant Quote
+
+Rapid Fab & Assembly
+
+As fast as 24 hours
+
+Guaranteed Quality
+
+99% product quality rate
+
+Fast Global Delivery
+
+Flexible shipping options available
+
+Tailored Solutions
+
+Product Idea-R&D-Launch-Upgrade
+
+All-in-One Electronics & Mechanical Solutions
+FR-4 PCBs
+1 - 32 layers
+Free POFV for 6+ layers
+10% impedance control available
+
+From $2.00 / 5 pcs Build Time: 24 hours
+
+Quote Now FR-4 PCB Service
+Flexible PCBs
+Adhesive-free for 1-2 layer FPC
+Supports PI, FR4, stainless steel, 3M tape stiffeners
+Supports EMI Shielding Film
+
+From $2.00 / 5 pcs Build Time: 5-6 days
+
+Quote Now Flexible PCB Service
+Metal Core PCBs
+Aluminum core: 1W thermal conductivity
+Copper core: 380W thermal conductivity
+Ideal for high-power LED and thermal management
+
+From $4.00 / 5 pcs Build Time: 2-3 days
+
+Quote Now Metal Core PCB Service
+High-Frequency PCBs
+Rogers/Teflon materials
+Low Dk/Df for signal integrity
+Ideal for 5G/RF/microwave applications
+
+From $47.00 / 5 pcs Build Time: 4-5 days
+
+Quote Now High-Frequency PCB Service
+PCB Assembly
+SMT & THT assembly
+740,000+ in-stock parts
+Free DFM check
+
+From $8.00 Build Time: 24 hours
+
+Quote Now PCB Assembly Service
+SMT Stencil
+304 HTA stainless steel
+±0.003 mm laser cutting precision
+Electropolish, nano-coat, step stencil
+
+From $3.00 Build Time: 12-48 hours
+
+Quote Now SMT Stencil Service
+PCB Layout
+Supports up to 100,000+ pins and 50 layers
+Rigid, flex, HDI, high-speed, and power boards
+Team of 50+ experienced engineers
+
+From $0.46 / pin Build Time: 2 days
+
+Order Now PCB Layout Service
+3D Printing
+SLA, MJF, SLM, FDM, SLS, WJP, BJ
+Resin, Nylon, Metal, Plastic Materials
+Tolerance down to ± 0.2mm
+
+From $0.30 Build Time: 2 days
+
+Quote Now 3D Printing Service
+CNC Machining
+Milling (3-, 4- & full 5-axis), Turning
+Aluminum, Steel, Copper, Plastic
+Tolerance down to ± 0.05mm
+
+From $5.00 Build Time: 3 days
+
+Quote Now CNC Machining Service
+JLCMC Online Supply
+160+ categories & competitive prices
+10000㎡ warehouse and manufacturing capabilities
+Free 3D files & flexible customization
+
+From $0.01 Same-Day Shipping
+
+Order Now
+Smart PCB & PCBA Ordering
+01 Upload PCB Files
+Upload your Gerber files, Bill of Materials (BOM), and Component Placement List (CPL) to receive instant quotes for PCB, components and assembly.
+All uploads are secure and confidential.
+02 Review PCB Components
+03 Order & Track
+04 Get Your Boards
+Order Now
+Your Trusted Global PCB Manufacturer
+Orders/Year
+21M+
+PCBs Produced/Year
+8M+ m²
+Production Capacity/Year
+11M+ m²
+Factory Area
+320+ acres
+
+JLCPCB powers the electronics industry with scalable manufacturing, digitalized workflows, and 24/6 global service. From PCB prototype to mass production, we enable millions of users to build faster, smarter, and more affordably.
+
+Learn More About JLCPCB >
+
+Customers Worldwide
+
+9.5M+
+
+Countries Covered
+
+180+
+What Our Customers Say
+View All Customer Reviews 
+32****4V
+
+The stencil worked flawlessly, it's rather my craftsmenship and the makeshift tooling that limits solder paste print quality. Nevertheless, I consider the the result of the prototype engine control unit solder paste print quite acceptable, see attached photo. even the 0.5mm fine pitch footprint pads are covered individually in most places. I like that JLCPCB automatically inserts grids in big pads so the scrape cannot dive into the recess and thus causes uneven paste application. Thanks so much! All the best, Thomas
+
+Electropolishing
+
+1
+81****3A
+
+For the ESP32-S3's fine-pitch footprints, stencil precision is non-negotiable. The stencil I received was manufactured with perfect accuracy, allowing for flawless solder paste application. It arrived quickly and was securely packaged. Combined with their professional support, JLCPCB is the most reliable partner for my projects.
+
+Electropolishing
+
+1
+24****3A
+
+The PCBs and assembly I ordered were absolutely fantastic! The quality is top-notch, and the work was done with incredible precision. I'm thoroughly impressed and will definitely be a returning customer.
+
+Economic PCBA
+
+2
+81****9A
+
+I ordered the Debugger Adapter PCB and was thoroughly impressed with its exceptional build quality and attention to detail. The silkscreen labeling was crisp and easy to read, with clearly marked headers, which made integration into my setup seamless. The board layout was clean and well-routed, minimizing signal interference and ensuring reliable performance. Soldering quality was top-notch, with no cold joints or flux residue. It worked flawlessly. Highly recommended for developers and engineers looking for a robust and professionally designed PCB!
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****3A
+
+The stencil was manufactured with excellent precision and worked perfectly during assembly. Apertures were cleanly cut, alignment was accurate, and solder paste release was consistent across both fine-pitch and standard components. This made PCB assembly much faster and reduced the need for touch-up work. Production time was very quick, and the stencil arrived flat and well-protected. I used it for assembling a custom HMI board, and it produced clean, repeatable solder paste deposits on every application. Great quality, excellent pricing, and highly recommended for prototype and small-batch production projects.
+
+Sanding
+
+1
+95****9A
+
+This was my first PCB project and the quality and appearance of the PCBs blew me away and I can hardly believe that I can get them so cheap! They were easily solderable and worked great electrically as well!
+
+FR-4, 4-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+2
+48****9A
+
+I ordered a small batch of PCBs and everything went smoothly. The whole process was fully automated, from upload to delivery, and I really appreciated the efficiency. Great quality boards and hassle-free service!
+
+FR-4, 2-Layer, Black, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****9A
+
+Il servizio PCBA di JLCPCB rappresenta una soluzione ideale per chi cerca un ciclo completo (PCB + montaggio SMT), conveniente, affidabile e veloce. Perfetto per prototipi o piccole serie: affidabile, con assistenza responsiva e qualità eccellente. Lo consiglio senza riserve a hobbisti, maker e team di design!
+
+Economic PCBA
+
+2
+22****8A
+
+Framework-less stencil, sanded finish. Aperture precision is excellent, paste release was clean on first try, no clogging on the 0603 and SOT-23 pads even after several boards. Edges are well-deburred, no risk of tearing the kapton mask. Good thickness consistency overall. Works great for manual paste application with a squeegee.
+
+Sanding
+
+1
+95****1A
+
+This order was a bit different than usual, because I needed to separate analog grounds, avoid noise among many other things, I tried to make several personal boards and they didn't work correctly, I decided to try my luck if with JLCPCB it could work due to the quality of their boards, and of course it worked as it should, I was able to finish my project on time and with higher quality.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+81****2A
+
+I've ordered PCBs from this service multiple times, and the product quality has always been excellent. The boards I received this time were manufactured with great precision — all dimensions were exactly as specified in the design files. The drill holes, pads, and traces were clean and accurate, with no visible defects. The silkscreen was sharp and easy to read, and the solder mask was applied evenly, making assembly much easier. After populating the components, the board worked perfectly on the first try. I was very impressed by the reliability and consistency of the manufacturing. It's clear that attention to detail is a top priority. I trust this service for both prototyping and small production runs. The quality is more than sufficient for professional use, and I will definitely continue using it in the future.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****3A
+
+The stencil was manufactured with excellent precision and worked perfectly during assembly. Apertures were cleanly cut, alignment was accurate, and solder paste release was consistent across both fine-pitch and standard components. This made PCB assembly much faster and reduced the need for touch-up work. Production time was very quick, and the stencil arrived flat and well-protected. I used it for assembling a custom HMI board, and it produced clean, repeatable solder paste deposits on every application. Great quality, excellent pricing, and highly recommended for prototype and small-batch production projects.
+
+Sanding
+
+1
+95****9A
+
+This was my first PCB project and the quality and appearance of the PCBs blew me away and I can hardly believe that I can get them so cheap! They were easily solderable and worked great electrically as well!
+
+FR-4, 4-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+2
+48****9A
+
+I ordered a small batch of PCBs and everything went smoothly. The whole process was fully automated, from upload to delivery, and I really appreciated the efficiency. Great quality boards and hassle-free service!
+
+FR-4, 2-Layer, Black, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****9A
+
+Il servizio PCBA di JLCPCB rappresenta una soluzione ideale per chi cerca un ciclo completo (PCB + montaggio SMT), conveniente, affidabile e veloce. Perfetto per prototipi o piccole serie: affidabile, con assistenza responsiva e qualità eccellente. Lo consiglio senza riserve a hobbisti, maker e team di design!
+
+Economic PCBA
+
+2
+22****8A
+
+Framework-less stencil, sanded finish. Aperture precision is excellent, paste release was clean on first try, no clogging on the 0603 and SOT-23 pads even after several boards. Edges are well-deburred, no risk of tearing the kapton mask. Good thickness consistency overall. Works great for manual paste application with a squeegee.
+
+Sanding
+
+1
+95****1A
+
+This order was a bit different than usual, because I needed to separate analog grounds, avoid noise among many other things, I tried to make several personal boards and they didn't work correctly, I decided to try my luck if with JLCPCB it could work due to the quality of their boards, and of course it worked as it should, I was able to finish my project on time and with higher quality.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+81****2A
+
+I've ordered PCBs from this service multiple times, and the product quality has always been excellent. The boards I received this time were manufactured with great precision — all dimensions were exactly as specified in the design files. The drill holes, pads, and traces were clean and accurate, with no visible defects. The silkscreen was sharp and easy to read, and the solder mask was applied evenly, making assembly much easier. After populating the components, the board worked perfectly on the first try. I was very impressed by the reliability and consistency of the manufacturing. It's clear that attention to detail is a top priority. I trust this service for both prototyping and small production runs. The quality is more than sufficient for professional use, and I will definitely continue using it in the future.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+32****4V
+
+The stencil worked flawlessly, it's rather my craftsmenship and the makeshift tooling that limits solder paste print quality. Nevertheless, I consider the the result of the prototype engine control unit solder paste print quite acceptable, see attached photo. even the 0.5mm fine pitch footprint pads are covered individually in most places. I like that JLCPCB automatically inserts grids in big pads so the scrape cannot dive into the recess and thus causes uneven paste application. Thanks so much! All the best, Thomas
+
+Electropolishing
+
+1
+81****3A
+
+For the ESP32-S3's fine-pitch footprints, stencil precision is non-negotiable. The stencil I received was manufactured with perfect accuracy, allowing for flawless solder paste application. It arrived quickly and was securely packaged. Combined with their professional support, JLCPCB is the most reliable partner for my projects.
+
+Electropolishing
+
+1
+24****3A
+
+The PCBs and assembly I ordered were absolutely fantastic! The quality is top-notch, and the work was done with incredible precision. I'm thoroughly impressed and will definitely be a returning customer.
+
+Economic PCBA
+
+2
+81****9A
+
+I ordered the Debugger Adapter PCB and was thoroughly impressed with its exceptional build quality and attention to detail. The silkscreen labeling was crisp and easy to read, with clearly marked headers, which made integration into my setup seamless. The board layout was clean and well-routed, minimizing signal interference and ensuring reliable performance. Soldering quality was top-notch, with no cold joints or flux residue. It worked flawlessly. Highly recommended for developers and engineers looking for a robust and professionally designed PCB!
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+22****8A
+
+Framework-less stencil, sanded finish. Aperture precision is excellent, paste release was clean on first try, no clogging on the 0603 and SOT-23 pads even after several boards. Edges are well-deburred, no risk of tearing the kapton mask. Good thickness consistency overall. Works great for manual paste application with a squeegee.
+
+Sanding
+
+1
+95****1A
+
+This order was a bit different than usual, because I needed to separate analog grounds, avoid noise among many other things, I tried to make several personal boards and they didn't work correctly, I decided to try my luck if with JLCPCB it could work due to the quality of their boards, and of course it worked as it should, I was able to finish my project on time and with higher quality.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+81****2A
+
+I've ordered PCBs from this service multiple times, and the product quality has always been excellent. The boards I received this time were manufactured with great precision — all dimensions were exactly as specified in the design files. The drill holes, pads, and traces were clean and accurate, with no visible defects. The silkscreen was sharp and easy to read, and the solder mask was applied evenly, making assembly much easier. After populating the components, the board worked perfectly on the first try. I was very impressed by the reliability and consistency of the manufacturing. It's clear that attention to detail is a top priority. I trust this service for both prototyping and small production runs. The quality is more than sufficient for professional use, and I will definitely continue using it in the future.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+32****4V
+
+The stencil worked flawlessly, it's rather my craftsmenship and the makeshift tooling that limits solder paste print quality. Nevertheless, I consider the the result of the prototype engine control unit solder paste print quite acceptable, see attached photo. even the 0.5mm fine pitch footprint pads are covered individually in most places. I like that JLCPCB automatically inserts grids in big pads so the scrape cannot dive into the recess and thus causes uneven paste application. Thanks so much! All the best, Thomas
+
+Electropolishing
+
+1
+81****3A
+
+For the ESP32-S3's fine-pitch footprints, stencil precision is non-negotiable. The stencil I received was manufactured with perfect accuracy, allowing for flawless solder paste application. It arrived quickly and was securely packaged. Combined with their professional support, JLCPCB is the most reliable partner for my projects.
+
+Electropolishing
+
+1
+24****3A
+
+The PCBs and assembly I ordered were absolutely fantastic! The quality is top-notch, and the work was done with incredible precision. I'm thoroughly impressed and will definitely be a returning customer.
+
+Economic PCBA
+
+2
+81****9A
+
+I ordered the Debugger Adapter PCB and was thoroughly impressed with its exceptional build quality and attention to detail. The silkscreen labeling was crisp and easy to read, with clearly marked headers, which made integration into my setup seamless. The board layout was clean and well-routed, minimizing signal interference and ensuring reliable performance. Soldering quality was top-notch, with no cold joints or flux residue. It worked flawlessly. Highly recommended for developers and engineers looking for a robust and professionally designed PCB!
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****3A
+
+The stencil was manufactured with excellent precision and worked perfectly during assembly. Apertures were cleanly cut, alignment was accurate, and solder paste release was consistent across both fine-pitch and standard components. This made PCB assembly much faster and reduced the need for touch-up work. Production time was very quick, and the stencil arrived flat and well-protected. I used it for assembling a custom HMI board, and it produced clean, repeatable solder paste deposits on every application. Great quality, excellent pricing, and highly recommended for prototype and small-batch production projects.
+
+Sanding
+
+1
+95****9A
+
+This was my first PCB project and the quality and appearance of the PCBs blew me away and I can hardly believe that I can get them so cheap! They were easily solderable and worked great electrically as well!
+
+FR-4, 4-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+2
+48****9A
+
+I ordered a small batch of PCBs and everything went smoothly. The whole process was fully automated, from upload to delivery, and I really appreciated the efficiency. Great quality boards and hassle-free service!
+
+FR-4, 2-Layer, Black, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****9A
+
+Il servizio PCBA di JLCPCB rappresenta una soluzione ideale per chi cerca un ciclo completo (PCB + montaggio SMT), conveniente, affidabile e veloce. Perfetto per prototipi o piccole serie: affidabile, con assistenza responsiva e qualità eccellente. Lo consiglio senza riserve a hobbisti, maker e team di design!
+
+Economic PCBA
+
+2
+32****4V
+
+The stencil worked flawlessly, it's rather my craftsmenship and the makeshift tooling that limits solder paste print quality. Nevertheless, I consider the the result of the prototype engine control unit solder paste print quite acceptable, see attached photo. even the 0.5mm fine pitch footprint pads are covered individually in most places. I like that JLCPCB automatically inserts grids in big pads so the scrape cannot dive into the recess and thus causes uneven paste application. Thanks so much! All the best, Thomas
+
+Electropolishing
+
+1
+81****3A
+
+For the ESP32-S3's fine-pitch footprints, stencil precision is non-negotiable. The stencil I received was manufactured with perfect accuracy, allowing for flawless solder paste application. It arrived quickly and was securely packaged. Combined with their professional support, JLCPCB is the most reliable partner for my projects.
+
+Electropolishing
+
+1
+24****3A
+
+The PCBs and assembly I ordered were absolutely fantastic! The quality is top-notch, and the work was done with incredible precision. I'm thoroughly impressed and will definitely be a returning customer.
+
+Economic PCBA
+
+2
+81****9A
+
+I ordered the Debugger Adapter PCB and was thoroughly impressed with its exceptional build quality and attention to detail. The silkscreen labeling was crisp and easy to read, with clearly marked headers, which made integration into my setup seamless. The board layout was clean and well-routed, minimizing signal interference and ensuring reliable performance. Soldering quality was top-notch, with no cold joints or flux residue. It worked flawlessly. Highly recommended for developers and engineers looking for a robust and professionally designed PCB!
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****3A
+
+The stencil was manufactured with excellent precision and worked perfectly during assembly. Apertures were cleanly cut, alignment was accurate, and solder paste release was consistent across both fine-pitch and standard components. This made PCB assembly much faster and reduced the need for touch-up work. Production time was very quick, and the stencil arrived flat and well-protected. I used it for assembling a custom HMI board, and it produced clean, repeatable solder paste deposits on every application. Great quality, excellent pricing, and highly recommended for prototype and small-batch production projects.
+
+Sanding
+
+1
+95****9A
+
+This was my first PCB project and the quality and appearance of the PCBs blew me away and I can hardly believe that I can get them so cheap! They were easily solderable and worked great electrically as well!
+
+FR-4, 4-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+2
+48****9A
+
+I ordered a small batch of PCBs and everything went smoothly. The whole process was fully automated, from upload to delivery, and I really appreciated the efficiency. Great quality boards and hassle-free service!
+
+FR-4, 2-Layer, Black, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****9A
+
+Il servizio PCBA di JLCPCB rappresenta una soluzione ideale per chi cerca un ciclo completo (PCB + montaggio SMT), conveniente, affidabile e veloce. Perfetto per prototipi o piccole serie: affidabile, con assistenza responsiva e qualità eccellente. Lo consiglio senza riserve a hobbisti, maker e team di design!
+
+Economic PCBA
+
+2
+22****8A
+
+Framework-less stencil, sanded finish. Aperture precision is excellent, paste release was clean on first try, no clogging on the 0603 and SOT-23 pads even after several boards. Edges are well-deburred, no risk of tearing the kapton mask. Good thickness consistency overall. Works great for manual paste application with a squeegee.
+
+Sanding
+
+1
+95****1A
+
+This order was a bit different than usual, because I needed to separate analog grounds, avoid noise among many other things, I tried to make several personal boards and they didn't work correctly, I decided to try my luck if with JLCPCB it could work due to the quality of their boards, and of course it worked as it should, I was able to finish my project on time and with higher quality.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+81****2A
+
+I've ordered PCBs from this service multiple times, and the product quality has always been excellent. The boards I received this time were manufactured with great precision — all dimensions were exactly as specified in the design files. The drill holes, pads, and traces were clean and accurate, with no visible defects. The silkscreen was sharp and easy to read, and the solder mask was applied evenly, making assembly much easier. After populating the components, the board worked perfectly on the first try. I was very impressed by the reliability and consistency of the manufacturing. It's clear that attention to detail is a top priority. I trust this service for both prototyping and small production runs. The quality is more than sufficient for professional use, and I will definitely continue using it in the future.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****3A
+
+The stencil was manufactured with excellent precision and worked perfectly during assembly. Apertures were cleanly cut, alignment was accurate, and solder paste release was consistent across both fine-pitch and standard components. This made PCB assembly much faster and reduced the need for touch-up work. Production time was very quick, and the stencil arrived flat and well-protected. I used it for assembling a custom HMI board, and it produced clean, repeatable solder paste deposits on every application. Great quality, excellent pricing, and highly recommended for prototype and small-batch production projects.
+
+Sanding
+
+1
+95****9A
+
+This was my first PCB project and the quality and appearance of the PCBs blew me away and I can hardly believe that I can get them so cheap! They were easily solderable and worked great electrically as well!
+
+FR-4, 4-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+2
+48****9A
+
+I ordered a small batch of PCBs and everything went smoothly. The whole process was fully automated, from upload to delivery, and I really appreciated the efficiency. Great quality boards and hassle-free service!
+
+FR-4, 2-Layer, Black, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****9A
+
+Il servizio PCBA di JLCPCB rappresenta una soluzione ideale per chi cerca un ciclo completo (PCB + montaggio SMT), conveniente, affidabile e veloce. Perfetto per prototipi o piccole serie: affidabile, con assistenza responsiva e qualità eccellente. Lo consiglio senza riserve a hobbisti, maker e team di design!
+
+Economic PCBA
+
+2
+22****8A
+
+Framework-less stencil, sanded finish. Aperture precision is excellent, paste release was clean on first try, no clogging on the 0603 and SOT-23 pads even after several boards. Edges are well-deburred, no risk of tearing the kapton mask. Good thickness consistency overall. Works great for manual paste application with a squeegee.
+
+Sanding
+
+1
+95****1A
+
+This order was a bit different than usual, because I needed to separate analog grounds, avoid noise among many other things, I tried to make several personal boards and they didn't work correctly, I decided to try my luck if with JLCPCB it could work due to the quality of their boards, and of course it worked as it should, I was able to finish my project on time and with higher quality.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+81****2A
+
+I've ordered PCBs from this service multiple times, and the product quality has always been excellent. The boards I received this time were manufactured with great precision — all dimensions were exactly as specified in the design files. The drill holes, pads, and traces were clean and accurate, with no visible defects. The silkscreen was sharp and easy to read, and the solder mask was applied evenly, making assembly much easier. After populating the components, the board worked perfectly on the first try. I was very impressed by the reliability and consistency of the manufacturing. It's clear that attention to detail is a top priority. I trust this service for both prototyping and small production runs. The quality is more than sufficient for professional use, and I will definitely continue using it in the future.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+32****4V
+
+The stencil worked flawlessly, it's rather my craftsmenship and the makeshift tooling that limits solder paste print quality. Nevertheless, I consider the the result of the prototype engine control unit solder paste print quite acceptable, see attached photo. even the 0.5mm fine pitch footprint pads are covered individually in most places. I like that JLCPCB automatically inserts grids in big pads so the scrape cannot dive into the recess and thus causes uneven paste application. Thanks so much! All the best, Thomas
+
+Electropolishing
+
+1
+81****3A
+
+For the ESP32-S3's fine-pitch footprints, stencil precision is non-negotiable. The stencil I received was manufactured with perfect accuracy, allowing for flawless solder paste application. It arrived quickly and was securely packaged. Combined with their professional support, JLCPCB is the most reliable partner for my projects.
+
+Electropolishing
+
+1
+24****3A
+
+The PCBs and assembly I ordered were absolutely fantastic! The quality is top-notch, and the work was done with incredible precision. I'm thoroughly impressed and will definitely be a returning customer.
+
+Economic PCBA
+
+2
+81****9A
+
+I ordered the Debugger Adapter PCB and was thoroughly impressed with its exceptional build quality and attention to detail. The silkscreen labeling was crisp and easy to read, with clearly marked headers, which made integration into my setup seamless. The board layout was clean and well-routed, minimizing signal interference and ensuring reliable performance. Soldering quality was top-notch, with no cold joints or flux residue. It worked flawlessly. Highly recommended for developers and engineers looking for a robust and professionally designed PCB!
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+22****8A
+
+Framework-less stencil, sanded finish. Aperture precision is excellent, paste release was clean on first try, no clogging on the 0603 and SOT-23 pads even after several boards. Edges are well-deburred, no risk of tearing the kapton mask. Good thickness consistency overall. Works great for manual paste application with a squeegee.
+
+Sanding
+
+1
+95****1A
+
+This order was a bit different than usual, because I needed to separate analog grounds, avoid noise among many other things, I tried to make several personal boards and they didn't work correctly, I decided to try my luck if with JLCPCB it could work due to the quality of their boards, and of course it worked as it should, I was able to finish my project on time and with higher quality.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+81****2A
+
+I've ordered PCBs from this service multiple times, and the product quality has always been excellent. The boards I received this time were manufactured with great precision — all dimensions were exactly as specified in the design files. The drill holes, pads, and traces were clean and accurate, with no visible defects. The silkscreen was sharp and easy to read, and the solder mask was applied evenly, making assembly much easier. After populating the components, the board worked perfectly on the first try. I was very impressed by the reliability and consistency of the manufacturing. It's clear that attention to detail is a top priority. I trust this service for both prototyping and small production runs. The quality is more than sufficient for professional use, and I will definitely continue using it in the future.
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+32****4V
+
+The stencil worked flawlessly, it's rather my craftsmenship and the makeshift tooling that limits solder paste print quality. Nevertheless, I consider the the result of the prototype engine control unit solder paste print quite acceptable, see attached photo. even the 0.5mm fine pitch footprint pads are covered individually in most places. I like that JLCPCB automatically inserts grids in big pads so the scrape cannot dive into the recess and thus causes uneven paste application. Thanks so much! All the best, Thomas
+
+Electropolishing
+
+1
+81****3A
+
+For the ESP32-S3's fine-pitch footprints, stencil precision is non-negotiable. The stencil I received was manufactured with perfect accuracy, allowing for flawless solder paste application. It arrived quickly and was securely packaged. Combined with their professional support, JLCPCB is the most reliable partner for my projects.
+
+Electropolishing
+
+1
+24****3A
+
+The PCBs and assembly I ordered were absolutely fantastic! The quality is top-notch, and the work was done with incredible precision. I'm thoroughly impressed and will definitely be a returning customer.
+
+Economic PCBA
+
+2
+81****9A
+
+I ordered the Debugger Adapter PCB and was thoroughly impressed with its exceptional build quality and attention to detail. The silkscreen labeling was crisp and easy to read, with clearly marked headers, which made integration into my setup seamless. The board layout was clean and well-routed, minimizing signal interference and ensuring reliable performance. Soldering quality was top-notch, with no cold joints or flux residue. It worked flawlessly. Highly recommended for developers and engineers looking for a robust and professionally designed PCB!
+
+FR-4, 2-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****3A
+
+The stencil was manufactured with excellent precision and worked perfectly during assembly. Apertures were cleanly cut, alignment was accurate, and solder paste release was consistent across both fine-pitch and standard components. This made PCB assembly much faster and reduced the need for touch-up work. Production time was very quick, and the stencil arrived flat and well-protected. I used it for assembling a custom HMI board, and it produced clean, repeatable solder paste deposits on every application. Great quality, excellent pricing, and highly recommended for prototype and small-batch production projects.
+
+Sanding
+
+1
+95****9A
+
+This was my first PCB project and the quality and appearance of the PCBs blew me away and I can hardly believe that I can get them so cheap! They were easily solderable and worked great electrically as well!
+
+FR-4, 4-Layer, Green, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+2
+48****9A
+
+I ordered a small batch of PCBs and everything went smoothly. The whole process was fully automated, from upload to delivery, and I really appreciated the efficiency. Great quality boards and hassle-free service!
+
+FR-4, 2-Layer, Black, HASL(with lead), PCB Prototype, Ink-jet/Screen Printing Silkscreen
+
+1
+42****9A
+
+Il servizio PCBA di JLCPCB rappresenta una soluzione ideale per chi cerca un ciclo completo (PCB + montaggio SMT), conveniente, affidabile e veloce. Perfetto per prototipi o piccole serie: affidabile, con assistenza responsiva e qualità eccellente. Lo consiglio senza riserve a hobbisti, maker e team di design!
+
+Economic PCBA
+
+2
+Trusted by Leading Businesses
+
+JLCPCB supports Raspberry Pi's global community by providing agile manufacturing services that help streamline the path from design to functional prototype.
+
+JLCPCB meets the stringent quality requirements of Siemens' industrial automation products through disciplined manufacturing and process control.
+
+JLCPCB serves as a manufacturing partner to Midea, delivering PCB solutions that balance performance and value for a diverse range of smart home products.
+
+JLCPCB News, FAQs and Solutions
+NewsFAQsBlog
+JLCPCB September & October 2026 Holiday Schedule Notice
+Sept 15, 2026
+JLCPCB at IMTS 2026: Powering End-to-End Electronics and Mechanical Innovation
+Sept 9, 2026
+JLC Technology Group to Host the 4th Spark Conference, Celebrating Open-Source Hardware Innovation
+Sept 14, 2026
+JLCPCB Officially Launches HDI PCB Manufacturing Services
+Sept 14, 2026
+JLC Technology Group Receives PayPal Outstanding Merchant Award for Global Digital Service Excellence
+Sept 14, 2026
+JLCPCB Unveils JLCONE: $2 PCBs & Exclusive Shipping Rates Now Available Only on JLCONE Desktop
+Aug 22, 2026
+View All News >
+Privacy & Security
+ Global Privacy Standards · ISO 27001 & 27701 Certified · PCI DSS Certified
+View Details >
+Online Chat >
+Chat with our live agent for fast reply.
+Mon-Fri: 24 hours, Sat: 9am-6pm, GMT+8
+Email Us >
+Contact us at supportjlcpcb.com
+Typically reply within hours.
+Help Center >
+Get instant answers.
+24/7 Available.
+Products
+FR-4 PCBs
+Flexible PCBs
+Metal Core PCBs
+High-Frequency PCBs
+PCBA Service
+PCB Layout
+SMT Stencil
+Flex Heater
+Support
+Help Center
+Contact Us
+Community
+Shipping & Delivery
+Payment Methods
+How to Order
+How to Track
+After-Sales Service
+Blog
+Company
+About Us
+Quality Assurance
+How We Work
+Certifications
+Security
+Environment
+JLCAPI
+News
+Cooperation
+Electronics
+EasyEDA
+JLCPCB
+JLCDFM
+LCSC
+OSHWLAB
+Mechanical
+JLC3DP
+JLCCNC
+JLCMC
+Order on JLCONE Desktop, Save $1–$20 Every Time
+Windows
+MAC
+Android
+IOS
+CONNECT WITH US
+© 2026 JLCPCB.COM All Rights Reserved.
+Privacy Policy
+Terms & Conditions
+Cookies Policy
+Do Not Sell or Share My Personal Information
+Help us improve your experience
+We use cookies to keep the website reliable and secure, provide an optimised experience, personalise content, and measure ads. By accepting, you agree to our Cookies Policy. You can update your preferences at any time.
+Manage Preferences
+Reject All
+Accept All
+ Welcome back, may I help you? Chat Now
