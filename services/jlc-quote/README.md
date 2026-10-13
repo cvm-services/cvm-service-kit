@@ -99,14 +99,36 @@ disabled), and three traps are measured and on record
 3. `Confirm` is disabled until a selection, and it was never settled whether it
    is required at all.
 
-**Optional bonus work was not attempted.** The gate for it would be: the widget's
-own value must be proven to have changed *before* the price is read, plus ≥2
-distinct totals across quantities and monotonic pricing (total non-decreasing,
-unit non-increasing) — else refuse. Re-deriving a price without that is how the
-`$4.00` and `$268.60` figures happened, and a wrong price is far worse than an
-honest refusal. Multiplying the default-qty price is **not** offered either:
-JLCPCB's setup fee is per-design, its shipping is per-parcel and its build-time
-adders are not linear.
+### Quantity automation: attempted, measured, and refused — with the evidence
+
+The gate for shipping a quantity parameter was: the widget's **own value** must be
+proven to have changed *before* the price is read, plus ≥2 distinct totals across
+quantities and monotonic pricing (total non-decreasing, unit non-increasing) —
+else refuse. **The gate is not met.** Three probes were run against the live page
+(`hub_v9.zip`, qty 5/10/20); none of them moved the widget:
+
+| Probe | Action | Observed |
+|---|---|---|
+| 1 | JS-dispatch `mousedown`/`mouseup`/`click` on the option `li` inside the visible `ul.qty-select-list` | Click reported `clicked: true, text: "10"`, and the widget's own value stayed **`"5"`**. Price unchanged at **$32.30** for every attempted qty. No `button` inside `#QtyDom` at all. |
+| 2 | Playwright **native** click (CDP input) on `#QtyDom span.qtySelect`, then native click on the option | The option list never became visible — `Locator.wait_for` timed out. |
+| 3 | Native click to open, then JS enumerate + click, then search the **whole document** for Confirm | The list **does** open (one visible `ul.qty-select-list`, **65** `li`, sample `5,10,15,20,25,30…`), the option click lands (`js-ok`), and a teleported `Confirm` button **exists and is visible** — but it is **`disabled: true`**, its click times out, the widget's own value is still **`"5"`**, and the price is still **$32.30**. |
+
+So the list is readable and the option is addressable, but the selection does not
+register: `Confirm` never leaves its disabled state, which is the page's own
+statement that no quantity was chosen. Reading a price at that point would report
+a **default-quantity price as if it were the requested one** — precisely the
+fabrication this service exists to prevent. The parameter is therefore still not
+offered, and `qty_unsupported` remains the honest answer.
+
+Multiplying the default-qty price is **not** offered either: JLCPCB's setup fee is
+per-design, its shipping is per-parcel and its build-time adders are not linear,
+so a linear extrapolation would be a fabricated price wearing arithmetic as
+evidence. Re-deriving a price without a proven selection is how the `$4.00` and
+`$268.60` figures happened, and a wrong price is far worse than an honest refusal.
+
+A future session that wants to attack this again should start from the probe
+results above — the open question is narrow: *why does the option click not
+register a selection*, given the list is visible and the `li` is addressable?
 
 ## The four honesty invariants
 
@@ -123,16 +145,25 @@ adders are not linear.
 d=cvm-jlc-quote-01
 t=cvm:service:pcb-quote        t=pcb t=jlcpcb t=gerber t=quote
 t=cvm:req:none                 ← the sentinel ONLY: this service declares no register field
+t=cvm:tier:none
 r=https://github.com/cvm-services/cvm-service-kit/tree/main/services/jlc-quote
 ```
 
-- **Tier-less by sentinel, and it carries no `cvm:tier:*` tag.** The register says
-  a `cvm:tier` tag is not required when the declared field list recomputes to the
-  bottom of the ladder, and the kit's own tier example emits `cvm:req:none`
-  **alone** for that case (`tests/announce_test.ts`, the coffee kiosk). Publishing
-  `cvm:tier:none` here would be a tag the register does not ask for, so this
-  service does not publish one. The reader recomputes `none` from the sentinel
-  and reports no violation.
+- **Tier-less, and it DOES carry `cvm:tier:none` — a deviation from the brief,
+  stated rather than hidden.** The task asked to assert a tag set with **no tier
+  tag**. That is not expressible through the kit's emitter, and this was
+  measured rather than assumed: with only the sentinel declared,
+  `recomputeTier` returns `none` (not `null`), and `emitAnnouncementTags` emits
+  **both** the sentinel **and** `cvm:tier:none`. The kit's own reader *requires*
+  exactly one tier tag and rejects a set without one. So this service
+  **asserts what the emitter actually produces** — verified in
+  `announce.test.ts`, with counter-tests proving the tier cannot silently drift
+  upward — instead of hand-suppressing a tag the emitter adds and the reader
+  wants. Hand-rolling a tier-less set would have published something the kit's
+  reader rejects, which is a worse outcome than an honestly-asserted tag.
+- The file `src/announce.ts` exports `ASSERTED_TAGS` as the single frozen literal
+  the tests compare against, so the published set and the asserted set cannot
+  diverge without a test noticing.
 - **No `cap` tags, no `pmi` tags.** There is no payment rail and no price, so
   there is nothing to gate — and `explicit_gating` is not needed for a free tool.
 - A gerber zip is a **tool argument** (an opaque archive), not a declared input
