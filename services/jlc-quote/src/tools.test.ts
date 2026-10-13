@@ -28,6 +28,21 @@ const NOW = "2026-10-13T23:00:00.000Z";
 const bag = (v: QuoteResponse | Refusal): Record<string, unknown> =>
   v as unknown as Record<string, unknown>;
 
+/**
+ * True only when a refusal's key set is EXACTLY the three refusal fields — i.e.
+ * there is no place a price could hide. Derived rather than asserted inline so
+ * it can be exercised in both directions: a helper used only in its passing
+ * direction is an assertion nobody has tested.
+ */
+function exactKeysOnly(
+  v: unknown,
+  keys: string[] = ["message", "reason", "refused"],
+): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  const actual = Object.keys(v as object).sort();
+  return actual.length === keys.length && actual.every((k, i) => k === [...keys].sort()[i]);
+}
+
 function run(over: Partial<BrowserRun> = {}): BrowserRun {
   return {
     raw_text: "",
@@ -76,6 +91,7 @@ describe("INVARIANT 1 — an expired/absent session is a VISIBLE refusal, never 
     // Structural: a refusal that could carry a number is a refusal that will.
     expect(Object.keys(out).sort()).toEqual(["message", "reason", "refused"]);
     expect(Object.keys(out)).not.toContain("pcb_price_usd");
+    expect(exactKeysOnly(out)).toBe(true);
     const blob = JSON.stringify(out);
     expect(blob).not.toContain("pcb_price");
     expect(blob).not.toContain("32.3");
@@ -154,6 +170,16 @@ describe("INVARIANT 1 — an expired/absent session is a VISIBLE refusal, never 
     const out = bag(quoteFromRun(await adaptedRun("hub_v9_qty5.txt"), { nowIso: NOW }));
     expect(out.refused).toBeUndefined();
     expect(out.pcb_price_usd).toBe(32.3);
+    // ...and the exact-key-set assertion separates the two shapes: a priced
+    // response is NOT a refusal by key set, so `exactKeysOnly` is not a
+    // constant `true` that would pass on anything.
+    expect(exactKeysOnly(out)).toBe(false);
+    // The helper's other failure directions: a price smuggled into a refusal,
+    // and a non-object, both fail.
+    expect(exactKeysOnly({ refused: true, reason: "x", message: "y", pcb_price_usd: 32.3 })).toBe(false);
+    expect(exactKeysOnly({ refused: true, reason: "x" })).toBe(false);
+    expect(exactKeysOnly(null)).toBe(false);
+    expect(exactKeysOnly("refused")).toBe(false);
   });
 
   test("an unconfigured adapter refuses adapter_error and never invents a price", async () => {
