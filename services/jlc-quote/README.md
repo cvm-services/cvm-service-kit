@@ -256,3 +256,29 @@ See `NOT_OFFERED` in `src/provenance.ts`, carried into the announcement content
 and the `docs` tool: no ordering, no quantity automation, no price arithmetic, no
 fallback-label price, no fabricated zero, no credentials. Omission reads as
 "maybe".
+
+## Assembled boards (PCBA) — NOT implemented, and why that is deliberate
+
+This service quotes **fabrication only**. An assembled-board (PCBA) quote is a
+different flow and a different set of inputs: it needs gerbers **plus** a
+centroid/CPL file **plus** a BOM carrying LCSC `C` part numbers. There is no
+`quote_pcba` tool yet; a call asking for assembly is refused rather than answered
+with a fabricated number.
+
+The research is done and the artifacts exist — see
+`jlcpcb-service/docs/PCBA-QUOTE-FINDINGS.md` for the full record, including:
+
+- the 16-line hub BOM with live-verified LCSC part numbers and per-line
+  provenance, the two package substitutions that were checked rather than
+  assumed, and the DNP set;
+- why the **wing has no meaningful PCBA** (its 6 solar cells are not in LCSC's
+  catalog and the remainder is through-hole — it is a hand-tabbed board);
+- the cost fact that the ESP32-S3-WROOM-1U forces the **Standard** PCBA tier;
+- the exact **resume point** in the browser flow (the scripted run reached
+  16/16 parts matched and stopped one step short of the price, with all page
+  states preserved).
+
+When `quote_pcba` is built it inherits every refusal above, plus one of its own:
+**DNP and unavailable parts must be reported explicitly, per line** — silently
+dropping them from a total would understate the cost in exactly the way the
+`$4.00` trap understated a board price.
