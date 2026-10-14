@@ -1,5 +1,122 @@
 # REPORT - gate money-safety fix (fix/gate-money-safety)
 
+## t_7233c336 — verification + merge pass (2026-10-14, offload worker)
+
+**Deliverable:** `docs/gate-consumer-audit.md` (the consumer audit with per-consumer grep evidence),
+`src/gate-recovery.ts` + `src/gate-recovery-cli.ts` + `src/gate-recovery.test.ts` (the HIGH recovery
+path), `docs/gate-recovery-runbook.md`, and the test hardening — all on branch
+`fix/gate-consumer-audit`, shipped as **PR #17**.
+
+### 0. The dispatch prose was stale; this is a verification-and-merge pass, not a redo
+
+Two facts had to be established before any work, and both change the framing:
+
+1. **PR #13 is MERGED, not open.** `gh pr view 13` → `state=MERGED`,
+   `mergedAt=2026-10-10T13:48:58Z`, `mergeCommit=220cb217ef27a91b0557b9d2df0db7d79094c052`, head
+   `fix/gate-money-safety` @ `4949736`. The cross-family BLOCKED verdict was returned on
+   `b35b916`; the branch was then advanced to `4949736` (which closed the M2-evidence and
+   recovery-documentation findings) and merged. So the instructed action — "push the branch,
+   update PR #13, request a re-review" — is not available: the PR it names is closed and merged.
+2. **The blocker work already existed.** Branch `fix/gate-consumer-audit` (= **PR #17**, OPEN)
+   already carried the audit, the recovery path and the test hardening, produced by the card's
+   earlier run. The durable card id `t_7233c336` is **not on board `contextvm-services`**
+   (`hermes kanban --board contextvm-services show t_7233c336` → "no such task").
+
+So the honest job was: verify the existing work against reality, find what was genuinely still
+wrong, fix that, and get PR #17 into a landable state.
+
+### 1. Finding: the branch had drifted 9 commits behind main (the one real defect)
+
+`git merge-base HEAD main` = `e2a7065`; `main` was at `0dc9b71`. The 9 missing commits include
+**PR #19** (*settled-replay proof binding*), which changed the *same two files* this branch
+changes: `GateOrder.proofHash`, the exported `TERMINAL_STATUSES`, the new-generation `CASE` in
+`SqliteGateStore.put`, and the `SettlementEvidenceMismatchError` / `SettlementBindingNotPersistedError`
+classes. `git merge-tree --write-tree main HEAD` reported conflicts in `src/gate-store.ts` and
+`PROGRESS.md`. A PR that cannot be merged cleanly cannot be landed, so this was blocking.
+
+**Fix:** merged `main` into the branch (never rebased, per the fleet working agreement), commit
+`cb01506`. Conflicts resolved as a **union**:
+
+* `src/gate-store.ts` — main's `proof_hash` migration, `TERMINAL_STATUSES`-derived SQL and
+  4-argument `claim(orderId, from, to, proofHash?)` are KEPT, together with this branch's
+  `gate_recovery` table, `list(statuses?)`, `putResolution()` / `listResolutions()` and the
+  `GateResolution` type. The recovery path calls only `get` / `list` / `claim(id, from, to)`, all
+  still satisfied (`proofHash` is optional, so the 3-argument call typechecks).
+* `PROGRESS.md` — both sections kept (main's `t_5b30bdec` rounds 1–4 and the branch's
+  `t_7233c336` entry).
+
+### 2. Finding: the audit's printed evidence was pinned to a superseded base
+
+`docs/gate-consumer-audit.md` printed raw grep output taken at `e2a7065`. Because PR #19 added
+~275 lines to `payment.ts` and two new `GateOrderStore` implementations inside
+`src/replay_binding.test.ts`, a reviewer following the document's own "Reproducing" section would
+have got **different output** — line numbers moved and F2's grep gained two test-file matches.
+The *claims* were unaffected; the *citations* were wrong.
+
+**Fix** (commit `53a1bb1`): every grep re-run on the merged tree and the document corrected —
+F2/F2b gain the `grep -v '\.test\.ts'` filter plus an explicit note naming the two test doubles
+(`LossyStore`, `LegacyClaimStore`); F4's `src/payment.ts:195` → `:394`; the F3 table header
+`e2a7065` → `0dc9b71`; F8's `gate-recovery.test.ts` count 5 → 6 (measured); and a new **merge
+note** section recording exactly what was merged, how the union was resolved, what was
+re-verified, and the unexecuted IaC line. `REPORT.md` carries the same base correction.
+
+### 3. What was verified (all on the shipped head `53a1bb1`)
+
+| check | result |
+| --- | --- |
+| `bun run typecheck` (`tsc --noEmit`) | **rc=0** |
+| `bun test src services` | **258 pass / 1 skip / 0 fail** (259 tests, 38 files) **rc=0** |
+| `bun test src/gate-recovery.test.ts` | 6 pass / 0 fail |
+| `bun test services/cvm-sms4sats/src/gate-durability.test.ts` | 3 pass / 0 fail (incl. the CONTROL showing the pre-fix shape re-runs: `runs === 2`) |
+| `bun test src/money_safety.test.ts` | 14 pass / 0 fail (incl. "a void tool (run() returns undefined) still replays from the cache") |
+| `gate-recovery-cli` exit codes | usage **rc=2**, bad subcommand **rc=2**, refusal **rc=1** (captured directly, not through a pipe) |
+| `ansible-playbook --syntax-check playbook-wrappers.yml` | **rc=0** |
+| CI on `53a1bb1` (GitHub Actions) | `bun` success, `deno` success, both `head=53a1bb1` |
+| PR #17 mergeability | `MERGEABLE` / `CLEAN` |
+
+**Independent re-derivation of the audit's own claims.** The audit's greps (F2/F2b/F3/F4a/F4b)
+plus the F1 `tsconfig` claim (`include: ["src/**/*.ts", "services/**/*.ts"]` — so every consumer
+is compiled by the same `tsc --noEmit`) and the F6 deploy claim (no `replica|scale|cluster|instances`
+anywhere in `deploy/`; the unit template is a plain `Type=simple`, single `ExecStart`,
+`Restart=always`) were all re-run on the merged tree. **The substance of F1–F7 holds unchanged.**
+The five named "consumers" are indeed directories under `services/` in this repo, not
+repositories; no consumer implements or accepts a `GateOrderStore`; the only product-code branch
+on a gate status is inside `src/payment.ts`; and no service product code references the gate error
+classes.
+
+### 4. Stated plainly — what was NOT verified
+
+* **The IaC line is unexecuted.** `deploy/ansible/playbook-wrappers.yml` gains
+  `GATE_DB: /var/lib/loom/cvm-sms4sats/gate.sqlite` for the `cvm-sms4sats` wrapper. The fleet
+  working agreement is explicit that an IaC change is *not* done at "syntax-check passes": it must
+  be executed against a live node and its post-condition read back **from the node**. This host has
+  no managed target and no fleet credentials, so the line is **syntax-checked only**. It is
+  additive, and `configFromEnv` defaults the identical path in code (so an un-updated host still
+  works) — but that is an argument, not evidence. This is the one item a reviewer with fleet
+  access should treat as open.
+* **`ngit` was not updated.** This host has no ngit account: `ngit account list` → "no accounts
+  available", and the push fails with `failed to get or find signer info in cli arguments, local
+  git config, global git config or system git config`. The GitHub remote was pushed and read back
+  (`git ls-remote github fix/gate-consumer-audit` = `53a1bb1`). Per the push policy a public repo
+  should reach both; from this host only GitHub was reachable.
+* **The cross-family re-review of PR #17 is outstanding.** The BLOCKED verdict on PR #13 is a
+  historical record on a merged PR; what gates a merge now is PR #17's own review, which did not
+  exist (`reviewDecision: ""`) when this pass started. The re-review request is published at
+  https://github.com/cvm-services/cvm-service-kit/pull/17#issuecomment-6165452917.
+
+### 5. Commits
+
+| commit | what |
+| --- | --- |
+| `cb01506` | `merge: main (0dc9b71) into fix/gate-consumer-audit` — the union resolution above |
+| `53a1bb1` | `docs: re-pin the consumer audit's grep evidence to the merged tree + merge note` |
+
+Both pushed to `github`; `fix/gate-consumer-audit` = `53a1bb1`.
+
+---
+
+
+
 ## t_7233c336 (2026-10-10) - consumer audit + operator recovery path + test hardening
 
 Branch `fix/gate-consumer-audit`, first written against `github/main` @ `e2a7065` (PR #13 itself is
