@@ -107,22 +107,29 @@ export class SqliteGateStore implements GateOrderStore {
   /**
    * Every order in one of `statuses` (all orders when omitted), oldest first.
    *
+   * An explicitly EMPTY array is not "omitted": it matches nothing. Treating `[]`
+   * as "no filter" made `list([])` return the whole table, contradicting the
+   * documented contract and turning any caller whose status set happened to come
+   * out empty into a full-table scan.
+   *
    * Deliberately NOT part of the `GateOrderStore` interface: the gate itself only
    * ever needs point reads, and widening the shared primitive is what the PR #13
    * audit was about. Enumeration is an operator/recovery need that only makes
    * sense over a durable store, so it lives on the concrete implementation.
    */
   list(statuses?: GateOrderStatus | GateOrderStatus[]): GateOrder[] {
-    const want = statuses === undefined ? [] : Array.isArray(statuses) ? statuses : [statuses];
-    const rows =
-      want.length === 0
-        ? this.db.query(`SELECT * FROM gate_orders ORDER BY updated_at ASC`).all()
-        : this.db
-            .query(
-              `SELECT * FROM gate_orders WHERE status IN (${want.map(() => "?").join(",")})
-               ORDER BY updated_at ASC`,
-            )
-            .all(...want);
+    if (statuses !== undefined) {
+      const want = Array.isArray(statuses) ? statuses : [statuses];
+      if (want.length === 0) return [];
+      const rows = this.db
+        .query(
+          `SELECT * FROM gate_orders WHERE status IN (${want.map(() => "?").join(",")})
+           ORDER BY updated_at ASC`,
+        )
+        .all(...want);
+      return (rows as any[]).map(SqliteGateStore.rowToOrder);
+    }
+    const rows = this.db.query(`SELECT * FROM gate_orders ORDER BY updated_at ASC`).all();
     return (rows as any[]).map(SqliteGateStore.rowToOrder);
   }
 

@@ -315,3 +315,21 @@ working agreement requires IaC to be executed against a live node *and read back
 node*; this host has no managed target and no fleet credentials, so the line is
 **unexecuted**. It is a pure additive env var consumed by `configFromEnv` (defaulted in
 code, so an un-updated host still works) — but that is an argument, not evidence.
+
+## Independent self-check (SAME family — explicitly NOT a D-115 review)
+
+Every non-flash model lane was capacity-exhausted on this host when the pass ran —
+`HTTP 503 "all providers exhausted (flat router)"` for `kimi-k3`, `kimi-k2.7-code`,
+`kimi-k3:cloud`, `minimax-m3:cloud` and `deepseek/deepseek-v4-pro`. A **cross-family** review
+therefore could not be obtained here, and the re-review request was published on the PR
+instead (see the PR comment). A same-family, independent-context adversarial pass was run
+anyway — `deepseek/deepseek-v4-flash`, which is the *dispatching agent's own family*, so it
+**does not satisfy D-115 and is not a review of record**. Its findings and dispositions:
+
+| finding | disposition |
+| --- | --- |
+| HIGH: `gate-recovery-cli.ts` absent from the reviewed diff, so the CLI money-path is unreviewed | **not a defect** — an artefact of the diff subset handed to the lane. The file is in the branch, and its exit codes were measured directly here (usage 2, bad subcommand 2, refusal 1) |
+| MED: `releaseReservation`'s only guard is the time-based lease, and `--force` bypasses even that | **accepted, documented** — the lease is a *surfacing hint*, never an enforcement, because whether a crashed action reached the venue is knowable only from the venue. There is no durable record of a **release** itself, which is a real asymmetry with `recordCompensation`; noted here rather than fixed, since adding one changes the CLI contract |
+| MED: the escape-hatch test's `verify()` returns `true` unconditionally, so it proves the CAS/release mechanics but not a real single-use proof being re-driven | **accepted** — the same simplification the gate's own tests use; the processor-level exactly-once hazard is a documented residual (`PaymentProcessor.verify` JSDoc, REPORT §5) |
+| LOW: `list([])` returned **ALL** orders, contradicting its own doc ("all orders when omitted") | **FIXED** — RED test added first (`src/gate-store.test.ts`, "list([]) is an EMPTY filter, not 'no filter'"), then `list([])` returns `[]`; `list()` / `list("x")` / `list(["x","y"])` unchanged |
+| LOW: a compensated order stays in `findStuckOrders` forever | **by design** — the report shows it as `compensated=<outcome>` so the operator sees it is resolved, and `settlement_failed` is deliberately never rewritten (that status is what keeps a replay refusing) |

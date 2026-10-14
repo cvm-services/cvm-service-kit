@@ -270,4 +270,19 @@ branch as **PR #17** (OPEN). The durable card `t_7233c336` is not on board `cont
   managed target and no fleet credentials, so it is unexecuted. Syntax-check only.
 - still open: the cross-family **re-review of PR #17**. The BLOCKED verdict on PR #13 stands as a
   historical record; PR #17's own review is what gates a merge.
+- cross-family review COULD NOT be obtained from this host: every non-flash lane returned
+  `HTTP 503 "all providers exhausted (flat router)"` (kimi-k3, kimi-k2.7-code, kimi-k3:cloud,
+  minimax-m3:cloud, deepseek/deepseek-v4-pro). The re-review request is published on the PR
+  (comment 6165452917) instead. A SAME-family independent-context self-check
+  (`deepseek/deepseek-v4-flash` — the dispatching agent's own family, so it does NOT satisfy
+  D-115 and is not a review of record) was run anyway; findings and dispositions are tabulated in
+  `docs/gate-consumer-audit.md` § "Independent self-check".
+- finding (from that self-check, LOW): `SqliteGateStore.list([])` returned **ALL** orders,
+  contradicting its own doc ("all orders when omitted"). Latent — no caller passes `[]` today, but
+  a config-driven status set that came out empty would have scanned the whole table. | status:
+  FIXED, TDD (RED test `src/gate-store.test.ts` "list([]) is an EMPTY filter, not 'no filter'"
+  failed with the full table, then `list([])` returns `[]`; `list()` / `list("x")` /
+  `list(["x","y"])` unchanged). | files: src/gate-store.ts, src/gate-store.test.ts
+- green after that fix: `bun run typecheck` rc=0; `bun test src services` **259 pass / 1 skip /
+  0 fail** (260 tests, 38 files) rc=0.
 

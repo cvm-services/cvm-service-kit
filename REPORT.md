@@ -110,8 +110,35 @@ classes.
 | --- | --- |
 | `cb01506` | `merge: main (0dc9b71) into fix/gate-consumer-audit` — the union resolution above |
 | `53a1bb1` | `docs: re-pin the consumer audit's grep evidence to the merged tree + merge note` |
+| `361efdf` | `docs(report): t_7233c336 verification + merge pass write-up` |
+| (final) | `fix(gate-store): list([]) is an empty filter` — TDD fix from the self-check |
 
-Both pushed to `github`; `fix/gate-consumer-audit` = `53a1bb1`.
+### 6. The cross-family review could not be obtained here — and one real bug it still found
+
+Every non-flash model lane was capacity-exhausted on this host:
+`HTTP 503 "all providers exhausted (flat router)"` for `kimi-k3`, `kimi-k2.7-code`,
+`kimi-k3:cloud`, `minimax-m3:cloud` **and** `deepseek/deepseek-v4-pro`. So no cross-family
+review could be produced from this machine; the re-review **request** is published at
+https://github.com/cvm-services/cvm-service-kit/pull/17#issuecomment-6165452917 and the review
+itself remains outstanding. **D-115 is therefore NOT satisfied for this branch.**
+
+A same-family, independent-context adversarial pass was run anyway (`deepseek/deepseek-v4-flash`
+— the dispatching agent's own family, explicitly labelled in the artifact and in the audit doc as
+**not** a review of record). It returned `APPROVED_WITH_FINDINGS` with 5 findings; the full
+disposition table is in `docs/gate-consumer-audit.md` § "Independent self-check". Net result:
+
+* One **real** latent bug, now fixed under TDD: `SqliteGateStore.list([])` returned **all**
+  orders, contradicting its own documented contract ("all orders when omitted"). Unreachable from
+  today's callers, but a trap for any caller whose status list filtered down to empty. RED test
+  added first, then the fix; `list()` / `list("x")` / `list(["x","y"])` unchanged.
+* One false HIGH (the CLI file was outside the diff subset handed to the lane — its exit codes
+  were measured directly instead).
+* Two accepted design tensions, both already documented: the lease is a *surfacing hint*, not an
+  enforcement (the venue check cannot be automated); and the escape-hatch test's `verify()` is a
+  fake, so the processor-level exactly-once hazard stays a documented residual.
+
+Re-verified after the fix: `bun run typecheck` rc=0; `bun test src services` → **259 pass /
+1 skip / 0 fail** (260 tests, 38 files) rc=0.
 
 ---
 
