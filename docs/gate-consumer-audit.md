@@ -92,20 +92,26 @@ which is the point.)
 
 ```
 $ grep -rn --include=*.ts "new ExplicitGate(" src services | grep -v '\.test\.ts'
-services/cvm-lambda/src/server.ts:118      ? new ExplicitGate(
-services/cvm-ppq/src/server.ts:21          ? new ExplicitGate(
-services/cvm-nanogpt/src/server.ts:16      ? new ExplicitGate(
-services/cvm-2fiat/src/server.ts:95        ? new ExplicitGate(
-services/cvm-sms4sats/src/server.ts:93     return new ExplicitGate(processor, new SqliteGateStore(gateDb));
-src/evidence/red_before.ts:48              const gate = new ExplicitGate(processor, new MemoryOrderStore());  # evidence harness
+src/evidence/red_before.ts:48:const gate = new ExplicitGate(processor, new MemoryOrderStore());
+services/cvm-lambda/src/server.ts:118:      ? new ExplicitGate(
+services/cvm-sms4sats/src/server.ts:93:  return new ExplicitGate(processor, new SqliteGateStore(gateDb));
+services/cvm-2fiat/src/server.ts:95:      ? new ExplicitGate(
+services/cvm-ppq/src/server.ts:21:      ? new ExplicitGate(
+services/cvm-nanogpt/src/server.ts:16:      ? new ExplicitGate(
+services/cvm-deepinfra/src/server.ts:26:      ? new ExplicitGate(
 ```
 
-| consumer | gate store at `main` (`0dc9b71`) | durable? | affected by the hardened interface |
+The first line is the `src/evidence/` RED-before harness, not a service. The remaining
+**six** are product construction sites — five at the time of the first pass, plus
+`cvm-deepinfra` (see the second merge note at the end).
+
+| consumer | gate store at the merged head | durable? | affected by the hardened interface |
 | --- | --- | --- | --- |
 | `services/cvm-lambda/src/server.ts:118-120` | `new SqliteGateStore(cfg.gateDb)` | yes | none — has `claim`; only gains the terminal-state behaviour |
 | `services/cvm-ppq/src/server.ts:21-23` | `new SqliteGateStore(env.GATE_DB ?? "/var/lib/loom/cvm-ppq/gate.sqlite")` | yes | none |
 | `services/cvm-nanogpt/src/server.ts:16-18` | `new SqliteGateStore(env.GATE_DB ?? "/var/lib/loom/cvm-nanogpt/gate.sqlite")` | yes | none |
 | `services/cvm-2fiat/src/server.ts:95` | `new SqliteGateStore(cfg.gateDb)` | yes | none |
+| `services/cvm-deepinfra/src/server.ts:26-29` | `new SqliteGateStore(env.GATE_DB ?? "/var/lib/loom/cvm-deepinfra/gate.sqlite")` | yes | none |
 | `services/cvm-sms4sats/src/server.ts` | **`new ExplicitGate(processor)` — no store** | **no (in-process Map)** | **this was the defect; fixed on this branch, see F5** |
 
 ## F4. No consumer branches on a gate status, so the new terminal states break nothing
@@ -315,6 +321,48 @@ working agreement requires IaC to be executed against a live node *and read back
 node*; this host has no managed target and no fleet credentials, so the line is
 **unexecuted**. It is a pure additive env var consumed by `configFromEnv` (defaulted in
 code, so an un-updated host still works) — but that is an argument, not evidence.
+
+## Merge note 2 (2026-10-14) — main advanced again, and the consumer set GREW to six
+
+`main` moved on from `0dc9b71` to `b9a50bf` (12 commits: PRs #20–#22, the `cvm-jlc-quote`
+service and `cvm-deepinfra`). `main` was merged into the branch again
+(`6b69d08`, merge, never rebase). It applied with **no conflicts**; the single file
+touched on both sides is `deploy/ansible/playbook-wrappers.yml`, and the two hunks are in
+different regions (ours adds `GATE_DB:` for `cvm-sms4sats` at the wrapper list head; main
+appends a whole `cvm-jlc-quote` wrapper at the tail).
+
+**The finding that matters: the consumer set is not closed, and it grew.**
+
+`cvm-deepinfra` is a **new sixth** `ExplicitGate` construction site
+(`services/cvm-deepinfra/src/server.ts:26-29`), and `cvm-jlc-quote` is a new service that
+does *not* touch the gate (`PAYMENT_MODE: "none"`). The F3 table above is updated.
+
+This does not weaken the audit — it *demonstrates its own argument*:
+
+* The new consumer was written against the hardened interface and passes a durable
+  `SqliteGateStore(env.GATE_DB ?? "/var/lib/loom/cvm-deepinfra/gate.sqlite")`, i.e. it
+  already has the required `claim`. Had it not, `bun run typecheck` (which compiles
+  `src/**/*.ts` **and** `services/**/*.ts`) would have failed the moment it landed, on
+  `main`, before any gate change could reach it. That is F1/F2's point, confirmed by the
+  first new consumer to appear since the audit was written.
+* It is also why "audit the five named consumers" was the wrong shape of question: the
+  consumer set is defined by the repo's `services/*` directory and the typecheck, not by a
+  prose list frozen at review time. **The durable control is the in-tree typecheck, not a
+  checklist** — any future consumer is covered by it automatically.
+
+**Re-verified on the merge result** (`6b69d08`): `bun run typecheck` rc=0;
+`bun test src services` → **328 pass / 1 skip / 0 fail** (329 tests, 43 files) rc=0;
+`deno task test` → **29 passed / 0 failed**; `deno check src/payment.ts src/gate-store.ts
+src/gate-recovery.ts src/gate-recovery-cli.ts` rc=0.
+
+**One honest caveat about `bun test` and `tests/`.** `bun test src services tests` reports
+**3 fail / 3 errors** — all of them `ReferenceError: Deno is not defined` from
+`tests/deepinfra_quote_test.ts` and the other `Deno.test`-native files that `main` added
+under `tests/`. This is **pre-existing on `main`**, not a regression from this branch:
+a detached worktree at pristine `github/main` (`b9a50bf`) reports the identical
+`0 pass / 3 fail / 3 errors` for `bun test tests`. Those files belong to the **Deno** lane,
+where they pass (`deno task test` → 29 passed / 0 failed). The bun suite of record is
+therefore `bun test src services`, which is green.
 
 ## Independent self-check (SAME family — explicitly NOT a D-115 review)
 
