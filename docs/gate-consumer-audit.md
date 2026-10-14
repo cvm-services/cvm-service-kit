@@ -1,7 +1,9 @@
 # Consumer audit: the shared money gate (`ExplicitGate` / `GateOrderStore`)
 
 Card: `t_7233c336` — PR #13 money gate: consumer audit (BLOCKING) + recovery path + test hardening.
-Branch: `fix/gate-consumer-audit`, based on `github/main` @ `e2a7065`.
+Branch: `fix/gate-consumer-audit`, merged with `github/main` @ `0dc9b71` (the audit's first
+pass was written against `e2a7065`; the branch had drifted 9 commits behind, so the merge was
+taken and **every grep below re-run on the merged tree** — see the merge note at the end).
 
 The cross-family review of PR #13 made this audit the blocking item, on the premise
 that changing an exported, fleet-shared interface (`GateOrderStore.claim` became
@@ -67,18 +69,24 @@ Consequences that change the verdict:
 ## F2. No consumer owns a `GateOrderStore` — the `TypeError` failure mode does not exist
 
 ```
-$ grep -rn --include=*.ts "implements GateOrderStore" src services
-src/gate-store.ts:9:export class SqliteGateStore implements GateOrderStore {
-src/payment.ts:140:export class MemoryOrderStore implements GateOrderStore {
+$ grep -rn --include=*.ts "implements GateOrderStore" src services | grep -v '\.test\.ts'
+src/gate-store.ts:34:export class SqliteGateStore implements GateOrderStore {
+src/payment.ts:305:export class MemoryOrderStore implements GateOrderStore {
 
-$ grep -rn --include=*.ts ": GateOrderStore" src services
-src/payment.ts:161:    private readonly store: GateOrderStore = new MemoryOrderStore(),
+$ grep -rn --include=*.ts ": GateOrderStore" src services | grep -v '\.test\.ts'
+src/payment.ts:356:    private readonly store: GateOrderStore = new MemoryOrderStore(),
 ```
 
 Only the two kit implementations exist, and both define `claim`. No consumer declares
 its own store type, and none takes a `GateOrderStore` in its own signature. Therefore
 `this.store.claim is not a function` **cannot** be reached from any consumer: every
 construction site passes either a `SqliteGateStore` or nothing.
+
+(Without the `grep -v '\.test\.ts'` filter the same grep also matches two **test doubles**
+inside `src/replay_binding.test.ts` — `LossyStore` and `LegacyClaimStore`. They are in the
+kit's own test file, not in any service, and they implement the interface *because* they are
+deliberate mutation fixtures for the replay-binding tests. They are the only other matches,
+which is the point.)
 
 ## F3. Per-consumer gate construction — the complete table
 
@@ -92,7 +100,7 @@ services/cvm-sms4sats/src/server.ts:93     return new ExplicitGate(processor, ne
 src/evidence/red_before.ts:48              const gate = new ExplicitGate(processor, new MemoryOrderStore());  # evidence harness
 ```
 
-| consumer | gate store at `main` (`e2a7065`) | durable? | affected by the hardened interface |
+| consumer | gate store at `main` (`0dc9b71`) | durable? | affected by the hardened interface |
 | --- | --- | --- | --- |
 | `services/cvm-lambda/src/server.ts:118-120` | `new SqliteGateStore(cfg.gateDb)` | yes | none — has `claim`; only gains the terminal-state behaviour |
 | `services/cvm-ppq/src/server.ts:21-23` | `new SqliteGateStore(env.GATE_DB ?? "/var/lib/loom/cvm-ppq/gate.sqlite")` | yes | none |
@@ -104,7 +112,7 @@ src/evidence/red_before.ts:48              const gate = new ExplicitGate(process
 
 ```
 $ grep -rn --include=*.ts -E '\.status *=== *"(paid|settled|settlement_)' src services | grep -v '\.test\.ts'
-src/payment.ts:195:    if (order.status === "settled") {
+src/payment.ts:394:    if (order.status === "settled") {
 ```
 
 That is the *only* product-code branch on a `GateOrder.status` anywhere in the tree —
@@ -246,7 +254,7 @@ re-run an action of unknown outcome — the original double spend.
 | `src/gate-recovery.ts` | `findStuckOrders` (read-only: reserved + failed, with age and lease flag), `releaseReservation` (CAS `settlement_reserved -> awaiting_payment`, refuses a live lease unless `force`), `recordCompensation` (durable audit record for a `settlement_failed` order; deliberately leaves the status alone) |
 | `src/gate-recovery-cli.ts` | `bun src/gate-recovery-cli.ts list\|release\|compensate --db <gate.sqlite>`; exit 1 on refusal, 2 on usage error |
 | `src/gate-store.ts` | `list(statuses?)` + a `gate_recovery` table (`putResolution`/`listResolutions`). `list` is on the concrete store, NOT on the `GateOrderStore` interface — the interface is not widened again |
-| `src/gate-recovery.test.ts` | 5 tests, including the falsification control that inspecting is read-only, that a live lease is refused and `list` alone never moves a row |
+| `src/gate-recovery.test.ts` | 6 tests, including the falsification control that inspecting is read-only, that a live lease is refused and `list` alone never moves a row |
 | `docs/gate-recovery-runbook.md` | the operator procedure, per-service gate DB paths, and the hard rules |
 
 Two properties the tests pin down explicitly:
@@ -272,3 +280,38 @@ Two properties the tests pin down explicitly:
 | MED: `GateOrder.failure` with no DDL/migration; `changes === 1` presumes a unique key | already fixed — explicit `ALTER TABLE` migration + `order_id TEXT PRIMARY KEY`; covered by the pre-fix-database migration test |
 | LOW: `deno.lock` riding in an unrelated commit | **closed** — split into its own commit (`chore(deno): reconcile the committed deno.lock with package.json`) |
 | UNVERIFIED: replay guard keying on `result !== undefined` | **closed** — the guard is `status === "settled"`, and the "void tool (run() returns undefined)" test pins it against both stores |
+
+## Merge note (2026-10-14) — the branch was 9 commits behind and is now merged with main
+
+When this card was picked up for verification, `fix/gate-consumer-audit` was based on
+`e2a7065` while `main` had advanced to `0dc9b71` (PRs #14–#19, including PR #19's
+*settled-replay proof binding* — `GateOrder.proofHash`, `TERMINAL_STATUSES`, the
+`SettlementEvidenceMismatchError` / `SettlementBindingNotPersistedError` classes, and the
+new-generation `CASE` in `SqliteGateStore.put`). A stale PR cannot be merged, so `main`
+was merged into the branch (never rebased, per the fleet working agreement) and the two
+conflicts were resolved as a **union**:
+
+* `src/gate-store.ts` — main's `proof_hash` migration, `TERMINAL_STATUSES`-derived SQL and
+  4-argument `claim()` are KEPT, together with this branch's `gate_recovery` table,
+  `list()`, `putResolution()` / `listResolutions()` and the `GateResolution` type. The
+  recovery path only ever calls `get` / `list` / `claim(id, from, to)`, all of which the
+  merged store still satisfies (the `proofHash` parameter is optional).
+* `PROGRESS.md` — both sections kept.
+
+Two consequences worth stating plainly:
+
+1. **The line numbers in F2/F2b/F4 above were re-run on the merged tree** (they had moved:
+   `payment.ts` gained ~275 lines from PR #19). The claims did not change; only the
+   citations did. F2's grep now needs the `grep -v '\.test\.ts'` filter because PR #19
+   added two test doubles that implement the interface inside the kit's own test file.
+2. **Re-verified on the merge result** (`cb01506`): `bun run typecheck` rc=0;
+   `bun test src services` → **258 pass / 1 skip / 0 fail** (259 tests, 38 files) rc=0;
+   `bun test src/gate-recovery.test.ts` 6/6; `bun test services/cvm-sms4sats/src/gate-durability.test.ts`
+   3/3; `bun test src/money_safety.test.ts` 14/14.
+
+**Not verified here (stated, not hidden):** `deploy/ansible/playbook-wrappers.yml` gains a
+`GATE_DB:` env line for the `cvm-sms4sats` wrapper. That is an IaC change and the fleet
+working agreement requires IaC to be executed against a live node *and read back from the
+node*; this host has no managed target and no fleet credentials, so the line is
+**unexecuted**. It is a pure additive env var consumed by `configFromEnv` (defaulted in
+code, so an un-updated host still works) — but that is an argument, not evidence.

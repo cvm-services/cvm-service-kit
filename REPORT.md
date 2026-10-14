@@ -2,7 +2,10 @@
 
 ## t_7233c336 (2026-10-10) - consumer audit + operator recovery path + test hardening
 
-Branch `fix/gate-consumer-audit`, based on `github/main` @ `e2a7065` (PR #13 itself is merged).
+Branch `fix/gate-consumer-audit`, first written against `github/main` @ `e2a7065` (PR #13 itself is
+merged) and **merged with `github/main` @ `0dc9b71` on 2026-10-14** — the branch had drifted 9
+commits behind, so the merge was taken and the greps below re-run on the merged tree. See the merge
+note at the end of `docs/gate-consumer-audit.md`.
 Full audit: `docs/gate-consumer-audit.md`. Runbook: `docs/gate-recovery-runbook.md`.
 Evidence: `evidence/recovery/`.
 
@@ -23,7 +26,7 @@ are directories under `services/` in **this** repo, importing the gate through r
 
 `grep -rn "implements GateOrderStore" src services` returns exactly two classes, both in the kit, and
 `grep -rn ": GateOrderStore" src services` returns one construction site - the gate's own default.
-No consumer owns a store, and no consumer branches on a gate status (`src/payment.ts:195` is the only
+No consumer owns a store, and no consumer branches on a gate status (`src/payment.ts:394` is the only
 `.status ===` on a `GateOrder` in the tree). So the `TypeError` failure mode does not exist and the
 new terminal states break nothing downstream.
 

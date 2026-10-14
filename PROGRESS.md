@@ -225,3 +225,49 @@ Two of the three were real defects in round 2's work; all are fixed or conceded.
   M13 (equality assertion deleted first, then settle_failed removed) also caught -> proves the
   behavioural loop has teeth on its own; source restored byte-identical.
 - report: REPORT-t_5b30bdec.md sections 7 (all four rounds), 12, 13 updated.
+
+---
+
+## t_7233c336 — verification + merge pass (2026-10-14, offload worker)
+
+**Arrival state, and why this is a verification pass rather than a redo.** The dispatch prose was
+stale in two ways: (1) PR #13 is **MERGED** (`mergedAt=2026-10-10T13:48:58Z`, merge commit
+`220cb21`; the reviewed head `b35b916` was superseded by `4949736` before merge), so "update PR #13
+and request a re-review" is not an available action; (2) the blocker work already exists on this
+branch as **PR #17** (OPEN). The durable card `t_7233c336` is not on board `contextvm-services`
+(`hermes kanban show t_7233c336` -> "no such task").
+
+**What was actually wrong and is now fixed.**
+
+- finding: `fix/gate-consumer-audit` was based on `e2a7065` while `main` had reached `0dc9b71` — 9
+  commits behind, including PR #19's settled-replay proof binding (`GateOrder.proofHash`,
+  `TERMINAL_STATUSES`, the new-generation `CASE`, 2 new error classes). A stale PR cannot be
+  merged. | status: FIXED — `main` merged into the branch (`cb01506`), never rebased; conflicts
+  resolved as a union in `src/gate-store.ts` (main's `proof_hash` migration + `TERMINAL_STATUSES`
+  SQL + 4-arg `claim()` KEPT alongside this branch's `gate_recovery` table / `list()` /
+  `putResolution()` / `listResolutions()`) and in `PROGRESS.md` (both sections kept). | files:
+  src/gate-store.ts, PROGRESS.md
+- finding: the audit doc's printed grep evidence was pinned to `e2a7065`; PR #19 shifted
+  `payment.ts` by ~275 lines, so a reviewer re-running the greps would get different line numbers
+  (and F2's grep now also matches two test doubles in `src/replay_binding.test.ts`). | status:
+  FIXED — every grep re-run on the merged tree; F2/F2b/F4 citations updated (`payment.ts:195` ->
+  `:394`), F2 now carries the `grep -v '\.test\.ts'` filter and an explicit note on the two test
+  doubles; F8's test count corrected 5 -> 6; a merge note added. | files:
+  docs/gate-consumer-audit.md, REPORT.md
+- verified (all on the merge result `cb01506`): `bun run typecheck` rc=0; `bun test src services`
+  -> **258 pass / 1 skip / 0 fail** (259 tests, 38 files) rc=0; `bun test src/gate-recovery.test.ts`
+  6/6; `bun test services/cvm-sms4sats/src/gate-durability.test.ts` 3/3; `bun test
+  src/money_safety.test.ts` 14/14; recovery CLI exit codes measured honestly (usage rc=2, bad
+  subcommand rc=2, refusal rc=1); `ansible-playbook --syntax-check playbook-wrappers.yml` rc=0.
+- independently re-ran the audit's own greps (F2/F2b/F3/F4a/F4b) and the F1 tsconfig and F6 deploy
+  claims on the merged tree: the *substance* of every one of F1-F7 holds unchanged.
+- pushed: `github` `fix/gate-consumer-audit` = `cb01506` (read back via `git ls-remote`). **ngit
+  push FAILED** — this host has no ngit account (`ngit account list` -> "no accounts available";
+  `failed to get or find signer info`). GitHub-only on this host; stated, not hidden.
+- NOT verified (stated, not hidden): the `GATE_DB:` line added to
+  `deploy/ansible/playbook-wrappers.yml` is an **IaC change** and the fleet working agreement
+  requires IaC to be executed against a live node and read back from the node. This host has no
+  managed target and no fleet credentials, so it is unexecuted. Syntax-check only.
+- still open: the cross-family **re-review of PR #17**. The BLOCKED verdict on PR #13 stands as a
+  historical record; PR #17's own review is what gates a merge.
+
