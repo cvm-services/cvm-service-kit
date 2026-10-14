@@ -1,0 +1,30 @@
+========================================================================
+MUTATION EVIDENCE — gate recovery path (t_7233c336 verification pass, 2026-10-14)
+Host: x280   HEAD: d450a1c42393e089b1efb11808df6dd14ad909d7
+Method: mutate src/gate-recovery.ts in place, run `bun test src/gate-recovery.test.ts`,
+restore byte-identical (verified: True). Baseline = 6 pass / 0 fail.
+========================================================================
+
+BASELINE (unmutated)
+  6 pass / 0 fail, 60 expect() calls
+
+M-R1  drop the live-lease guard   `ageMs <= leaseMs && !opts.force` -> `false && ...`
+  RESULT: 4 pass / 2 fail   => CAUGHT
+  (catches: "a live lease is refused, and clearing it enables exactly one real retry";
+   "the operator command > list reports, release refuses a live lease then honours --force")
+
+M-R2  weaken the release CAS source: hard-coded "settlement_reserved" -> order.status
+  RESULT: 6 pass / 0 fail   => SURVIVES — but this is an EQUIVALENT MUTANT, not a gap.
+  Proof: line 116 already returns early unless `order.status === "settlement_reserved"`,
+  and `order` is a pre-read snapshot that nothing mutates before line 124. So at the CAS
+  the substituted expression is provably identical to the literal. The dangerous variant
+  of this mutant — an unconditional/blind-put release — IS caught by M-R3 below and by
+  the "release goes through the CAS" test, which asserts refusal === "not_reserved".
+
+M-R3  remove the not_reserved guard (line 116) entirely
+  RESULT: 4 pass / 2 fail   => CAUGHT
+  (the mutant above turns a settled/terminal row into a releasable one; the tests that
+   pin "release can never resurrect a terminal order" and "an already-moved row is never
+   re-released" both fire)
+
+Source restored byte-identical after every mutant: True
