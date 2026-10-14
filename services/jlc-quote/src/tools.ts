@@ -30,6 +30,10 @@ import {
   REFUSAL_LIST,
 } from "./provenance.ts";
 import { isRefusal, type BrowserRun, type QuoteFields, type Refusal } from "./types.ts";
+import { buildQuotePcbaSweepTool } from "./pcba.ts";
+
+/** Measured: JLCPCB charges a $25 setup fee per assembly side. */
+export const DEFAULT_FIXED_FEES_USD = 25;
 
 export interface JlcQuoteDeps {
   /** The browser leg. Omitted = unconfigured: the tool refuses, never invents. */
@@ -38,6 +42,14 @@ export interface JlcQuoteDeps {
   prepareInput?: (args: Record<string, unknown>) => { prepared: PreparedInput } | { refusal: Refusal };
   /** Recording array the tests use to prove the adapter was (not) entered. */
   adapterCalls?: string[];
+  /** Published break tables for the sweep, keyed by LCSC code. Omitted = empty. */
+  loadBreaks?: () => Record<string, { breaks: [number, number, number][]; stock: number }>;
+  /** Per-board counts for the sweep, keyed by LCSC code. */
+  perBoardByLcsc?: Record<string, number>;
+  /** Measured pcb prices by qty for the sweep. No entry => total null. */
+  pcbUsdByQty?: Record<number, number>;
+  /** Fixed order-level fees (setup/tooling). Measured: $25 per assembly side. */
+  fixedFeesUsd?: number;
 }
 
 /**
@@ -379,5 +391,18 @@ export function buildJlcQuoteTools(deps: JlcQuoteDeps): Tool[] {
     }),
   };
 
-  return [quote, docs];
+  // The deterministic quantity sweep. Pure arithmetic over published LCSC
+  // price-break tables: no browser, no network, no clock. Registered ALWAYS,
+  // because it needs no adapter — and it never emits a total for a quantity
+  // whose parts or PCB price are unknown (see pcba.ts invariants).
+  const sweepTool = buildQuotePcbaSweepTool(
+    () => deps.loadBreaks?.() ?? {},
+    () => deps.perBoardByLcsc ?? {},
+    {
+      fixedFeesUsd: deps.fixedFeesUsd ?? DEFAULT_FIXED_FEES_USD,
+      pcbUsdByQty: deps.pcbUsdByQty ?? {},
+    },
+  );
+
+  return [quote, sweepTool, docs];
 }
