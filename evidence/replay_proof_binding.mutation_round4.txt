@@ -1,0 +1,13 @@
+# Round-4 mutation evidence, post-F4-1 - the terminal-status list is load-bearing both ways
+# tree: cvm-service-kit @ 0b9c4a7786b97156b90329c67eb1684d750734b8 (working tree: M REPORT-t_5b30bdec.md
+ M evidence/replay_proof_binding.mutation_round4.txt)
+# test: bun test src/replay_binding.test.ts
+# baseline: 27 pass | 0 fail (145 expect() calls)
+# after F4-1 the sqlite CASE IN-list is interpolated from TERMINAL_STATUSES, so there is ONE list to mutate
+M8  TERMINAL_STATUSES loses `settlement_failed`: exit=1 :: 25 pass | 2 fail :: every terminal status that can carry a binding drops it on reuse (R3-1) > all four terminal statuses, on both bundled stores; every terminal status that can carry a binding drops it on reuse (R3-1) > the mirrored list is exactly the production terminal-status list
+M9  TERMINAL_STATUSES loses `refused`: exit=1 :: 25 pass | 2 fail :: every terminal status that can carry a binding drops it on reuse (R3-1) > all four terminal statuses, on both bundled stores; every terminal status that can carry a binding drops it on reuse (R3-1) > the mirrored list is exactly the production terminal-status list
+M10 TERMINAL_STATUSES loses `paid`: exit=1 :: 25 pass | 2 fail :: every terminal status that can carry a binding drops it on reuse (R3-1) > all four terminal statuses, on both bundled stores; every terminal status that can carry a binding drops it on reuse (R3-1) > the mirrored list is exactly the production terminal-status list
+M11 TERMINAL_STATUSES loses `settled`: exit=1 :: 24 pass | 3 fail :: a reused orderId does not inherit the previous order's binding (R2-3) > a new generation settles with its own evidence, on both bundled stores; every terminal status that can carry a binding drops it on reuse (R3-1) > all four terminal statuses, on both bundled stores; every terminal status that can carry a binding drops it on reuse (R3-1) > the mirrored list is exactly the production terminal-status list
+M12 TERMINAL_STATUSES GAINS `expired` (F4-1: the addition direction): exit=1 :: 26 pass | 1 fail :: every terminal status that can carry a binding drops it on reuse (R3-1) > the mirrored list is exactly the production terminal-status list
+M13 (equality test deleted first) TERMINAL_STATUSES loses `settlement_failed`: exit=1 :: 25 pass | 1 fail :: every terminal status that can carry a binding drops it on reuse (R3-1) > all four terminal statuses, on both bundled stores
+restored identical: True (payment.ts, gate-store.ts)

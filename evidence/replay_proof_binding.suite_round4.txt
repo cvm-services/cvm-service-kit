@@ -1,0 +1,35 @@
+# Round-4 suite evidence (t_5b30bdec R3-1 + F4-1)
+# tree: 0b9c4a7786b97156b90329c67eb1684d750734b8 + working tree (src/ committed)
+# bun 1.4.2 / deno deno 2.9.0 (stable, release, x86_64-unknown-linux-gnu)
+
+$ bun run test
+1 tests skipped:
+(skip) CashuLnWallet live integration > fund, makeInvoice, melt (payInvoice)
+
+ 248 pass
+ 1 skip
+ 0 fail
+ 10806 expect() calls
+Ran 249 tests across 36 files. [33.83s]
+exit=0
+
+$ bun run typecheck
+$ tsc --noEmit
+exit=0
+
+$ deno task check
+[0m[32mTask[0m [0m[36mcheck[0m deno check src/mod.ts
+[0m[32mCheck[0m src/mod.ts
+exit=0
+
+$ deno check src/payment.ts src/gate-store.ts (NOT in deno.json's mod.ts graph)
+[0m[32mCheck[0m src/payment.ts
+[0m[32mCheck[0m src/gate-store.ts
+exit=0
+
+$ deno task test
+the max-only tier makes the coarse filter a single server-side REQ ... [0m[32mok[0m [0m[38;5;245m(366µs)[0m
+
+[0m[32mok[0m | 24 passed | 0 failed [0m[38;5;245m(263ms)[0m
+
+exit=0
