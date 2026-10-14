@@ -286,3 +286,48 @@ branch as **PR #17** (OPEN). The durable card `t_7233c336` is not on board `cont
 - green after that fix: `bun run typecheck` rc=0; `bun test src services` **259 pass / 1 skip /
   0 fail** (260 tests, 38 files) rc=0.
 
+
+## t_7233c336 — offload verification pass 2 (2026-10-14, offload worker)
+
+**Arrival state.** The card's work was already complete and pushed as PR #17 (OPEN,
+head `d450a1c`, CI bun+deno pass). PR #13 is MERGED. This pass therefore verified rather
+than redid, and closed the two things that were actually stale.
+
+- verified the audit's own evidence reproduces on the merged tree: re-ran every F2/F2b/F3/F4
+  grep and the F1 tsconfig / F6 deploy claims independently. All reproduce; F1–F7 hold.
+- verified the recovery path has real teeth by MUTATION, not by reading it:
+  M-R1 (drop the live-lease guard) -> 4 pass/2 fail CAUGHT; M-R3 (remove the not_reserved
+  guard) -> 4 pass/2 fail CAUGHT; M-R2 (CAS source `"settlement_reserved"` -> `order.status`)
+  SURVIVES but is a provable EQUIVALENT mutant (the line-116 guard + snapshot pre-read make
+  the substitution a no-op), so it is not a coverage gap. Source restored byte-identical.
+  | evidence/recovery/mutation_gate_recovery.txt
+- verified the sms4sats durability fix's control has teeth: M-S1 (revert `buildGate` to
+  `new ExplicitGate(processor)`) -> 2 pass/1 fail CAUGHT.
+- **finding: the branch was 12 commits behind again** (`main` `0dc9b71` -> `b9a50bf`, PRs
+  #20–#22). | status: FIXED — merged (never rebased); `6b69d08`; no conflicts (the only
+  both-sides file is `deploy/ansible/playbook-wrappers.yml`, hunks in different regions).
+- **finding: `main` added a SIXTH gate consumer** — `services/cvm-deepinfra/src/server.ts:26`
+  — which the audit's F3 table did not cover. | status: FIXED — F3 table + a "Merge note 2"
+  section added. The new consumer already passes a durable `SqliteGateStore`, i.e. it has
+  the required `claim`; had it not, the in-tree typecheck would have failed on `main` the
+  moment it landed. This *confirms* F1/F2 and shows the durable control is the typecheck,
+  not a prose checklist of five names.
+- **finding (honesty):** `bun test src services tests` = 3 fail / 3 errors, all
+  `ReferenceError: Deno is not defined` from the `Deno.test`-native files `main` added under
+  `tests/`. | status: NOT a regression — a detached worktree at pristine `github/main`
+  (`b9a50bf`) reports the identical `0 pass/3 fail/3 errors` for `bun test tests`. They are
+  green in their own lane (`deno task test` 29/0). Recorded in the audit doc so a reviewer
+  does not mistake it for a branch defect.
+- green on `6b69d08`: `bun run typecheck` rc=0; `bun test src services` **328 pass / 1 skip /
+  0 fail** (329 tests, 43 files); `deno task test` **29 passed / 0 failed**;
+  `deno check src/{payment,gate-store,gate-recovery,gate-recovery-cli}.ts` rc=0.
+- pushed: `github` `fix/gate-consumer-audit` = `74b5fad` (read back via `git ls-remote`).
+  **ngit push FAILED** — `authentication required; run 'ngit account login'`; this host has
+  no ngit account. GitHub-only here, stated not hidden.
+- cross-family re-review: **still unobtainable from this host.** Probed every non-glm lane
+  directly: `kimi-k3` and `deepseek/deepseek-v4-pro` return `all providers exhausted`;
+  `minimax-m3:cloud` and `qwen3.6-35b` likewise; and — the important one —
+  `kimi-k2.7-code` and `kimi-k3:cloud` **silently return `model: deepseek-flash`**, i.e. the
+  flat router substitutes a SAME-FAMILY lane for an exhausted one. A "cross-family" review
+  taken at face value from those ids would have been deepseek reviewing deepseek. Not
+  accepted. Requested on the PR instead.

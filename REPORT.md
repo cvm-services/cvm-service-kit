@@ -1,5 +1,150 @@
 # REPORT - gate money-safety fix (fix/gate-money-safety)
 
+## t_7233c336 — offload verification pass 2 (2026-10-14, offload worker)
+
+**Head shipped:** `74b5fad` on `fix/gate-consumer-audit` → **PR #17** (OPEN, `MERGEABLE`/`CLEAN`,
+CI `bun` success + `deno` success at that head). PR #13 is MERGED.
+**Artifacts touched:** `docs/gate-consumer-audit.md` (F3 table + Merge note 2),
+`evidence/recovery/mutation_gate_recovery.txt` (new), `PROGRESS.md`, this report.
+
+### 0. Arrival state: the card's work was already done. This pass verified it and closed two stale gaps.
+
+The dispatch described work that a prior session had already completed and shipped as PR #17
+(head `d450a1c`): the consumer audit, the HIGH recovery path, the MED fixes, the branch pushed
+to GitHub, PR #13 pointed at. Re-doing it would have been waste and would have risked
+regressing a reviewed artifact. So this pass did the two things that were genuinely open, and
+verified the rest rather than asserting it:
+
+1. **the branch had drifted 12 commits behind `main` again** — the same class of defect the
+   previous pass fixed at 9 commits;
+2. **the cross-family re-review was (and remains) unobtainable**, which is what actually gates
+   a merge.
+
+### 1. Verification: the audit's own evidence, re-derived independently (not trusted)
+
+Every printed grep in the audit was re-run on the merged tree rather than read:
+
+| claim | re-derived result |
+| --- | --- |
+| F1 — the five named consumers are directories, not repos; `tsconfig` includes `services/**` | holds; `services/{_shared,cvm-2fiat,cvm-lambda,cvm-nanogpt,cvm-ppq,cvm-sms4sats}`; `include: ["src/**/*.ts","services/**/*.ts"]` |
+| F2 — no consumer owns a `GateOrderStore` | holds; exactly two `implements` sites, both in `src/` (`gate-store.ts:34`, `payment.ts:305`) |
+| F2b — no consumer-typed store parameter | holds; one site, `payment.ts:356` (the gate's own default) |
+| F3 — per-consumer construction | holds, **and the set had grown to six** (see §2) |
+| F4 — no consumer branches on a gate status | holds; the sole product branch is `payment.ts:394`, inside the gate |
+| F4b — no service catches the gate error classes | holds; `grep` over `services/` (minus tests): no matches |
+| F6 — no replica/scale deployment | holds; `grep -iE "replica\|scale\|cluster\|instances" deploy/`: no matches |
+
+### 2. Finding (real, from the merge): `main` added a SIXTH gate consumer
+
+`main` advanced `0dc9b71` → `b9a50bf` (12 commits: PRs #20–#22, `cvm-jlc-quote`,
+`cvm-deepinfra`). Merged into the branch as `6b69d08` — **merge, never rebase** — with **no
+conflicts**. The only file touched on both sides is `deploy/ansible/playbook-wrappers.yml`;
+our hunk adds `GATE_DB:` for `cvm-sms4sats` at the wrapper-list head, main's appends a whole
+`cvm-jlc-quote` wrapper at the tail. Different regions, so it auto-resolved.
+
+`services/cvm-deepinfra/src/server.ts:26-29` is a **new sixth** `ExplicitGate` construction
+site, so the audit's "five consumers" framing was already stale when written. It passes
+`new SqliteGateStore(env.GATE_DB ?? "/var/lib/loom/cvm-deepinfra/gate.sqlite")` — it has the
+required `claim`.
+
+**This strengthens rather than weakens the audit.** Had the new consumer lacked `claim`,
+`bun run typecheck` — which compiles `src/**/*.ts` *and* `services/**/*.ts` — would have
+failed on `main` the moment it landed, before any gate change could reach it. That is F1/F2's
+argument, confirmed by the first new consumer to appear since the audit. The generalisable
+conclusion: **the durable control is the in-tree typecheck, not a prose checklist frozen at
+review time.** Any future consumer is covered automatically. F3's table and a "Merge note 2"
+section were added to `docs/gate-consumer-audit.md`.
+
+### 3. Verification: the recovery path was MUTATION-tested, not merely read
+
+Reading a test and believing it is not evidence. Four mutants were injected into
+`src/gate-recovery.ts` and `services/cvm-sms4sats/src/server.ts`, each run against its own
+suite, then the source was restored and confirmed **byte-identical**.
+Evidence: `evidence/recovery/mutation_gate_recovery.txt`.
+
+| mutant | result | verdict |
+| --- | --- | --- |
+| M-R1 drop the live-lease guard (`ageMs <= leaseMs && !opts.force` → `false && …`) | 4 pass / **2 fail** | CAUGHT |
+| M-R3 remove the `not_reserved` guard (line 116) | 4 pass / **2 fail** | CAUGHT |
+| M-R2 CAS source `"settlement_reserved"` → `order.status` | 6 pass / 0 fail | **equivalent mutant**, not a gap — see below |
+| M-S1 revert `buildGate` to `new ExplicitGate(processor)` (the pre-fix sms4sats shape) | 2 pass / **1 fail** | CAUGHT |
+
+M-R2 deserves the note because "a survivor" is exactly the kind of result that gets over-read.
+It is **provably equivalent**: line 116 returns early unless `order.status ===
+"settlement_reserved"`, and `order` is a pre-read snapshot that nothing mutates before line
+124, so the substituted expression is identical to the literal at that point. The *dangerous*
+variant of the same idea — an unconditional / blind-put release — is caught by M-R3 and by the
+"release goes through the CAS" test, which asserts `refusal === "not_reserved"`. So the
+survivor is a property of the code's shape, not a hole in the suite.
+
+### 4. Green on the merge result (`6b69d08`; `74b5fad` adds only docs)
+
+- `bun run typecheck` → **rc=0**
+- `bun test src services` → **328 pass / 1 skip / 0 fail** (329 tests, 43 files), rc=0
+  (up from 259/1/0 before the merge, because `main` added `cvm-jlc-quote` and `cvm-deepinfra` tests)
+- `deno task test` → **29 passed / 0 failed**
+- `deno check src/{payment,gate-store,gate-recovery,gate-recovery-cli}.ts` → **rc=0**
+
+### 5. Stated plainly — an honest caveat and what was NOT verified
+
+- **`bun test src services tests` is 3 fail / 3 errors, and that is NOT this branch's doing.**
+  All three are `ReferenceError: Deno is not defined` from the `Deno.test`-native files `main`
+  added under `tests/` (`tests/deepinfra_quote_test.ts` et al.). Proven pre-existing: a detached
+  worktree at pristine `github/main` (`b9a50bf`) reports the identical `0 pass / 3 fail /
+  3 errors` for `bun test tests`. They pass in their own lane (`deno task test` → 29/0). The bun
+  suite of record is `bun test src services`. Recorded in the audit doc so a reviewer does not
+  mistake it for a branch defect.
+- **The `GATE_DB:` line in `deploy/ansible/playbook-wrappers.yml` is an IaC change and has NOT
+  been executed against a live node.** The fleet working agreement adds a 6th gate for IaC
+  (execute against a real target, then read the post-condition back *from the node*). This host
+  has no managed target and no fleet credentials, so the line is **syntax-checked only,
+  unexecuted**. It is a pure additive env var with a code-side default (so an un-updated host
+  still works) — but that is an argument, not evidence.
+- **ngit push FAILED.** `ngit account login` → `authentication required; failed to get or find
+  signer info`. This host has no ngit account, so this is **GitHub-only**. The GitHub push is
+  confirmed independently by `git ls-remote`, not by the push's own exit code.
+- **The cross-family re-review is still outstanding.** See §6 — it is the only thing gating
+  PR #17, and it could not be obtained here.
+
+### 6. The cross-family re-review: requested, and a lane-pool warning worth propagating
+
+Every non-glm lane was probed directly, and this pass found something the earlier pass could
+only report as "503":
+
+- `kimi-k3`, `deepseek/deepseek-v4-pro`, `minimax-m3:cloud`, `qwen3.6-35b` →
+  `{"error": "all providers exhausted (flat router)", "capacity_exhausted": true}`.
+- **`kimi-k2.7-code` and `kimi-k3:cloud` return `"model": "deepseek-flash"` in the response
+  body** — the flat router *silently substitutes* a same-family lane for an exhausted one.
+
+That second one is a fleet-level trap, not a local annoyance: a reviewer that dispatches to
+`kimi-k2.7-code`, reads the answer, and records `reviewer_model: kimi-k2.7-code` would produce
+a **deepseek-reviewing-deepseek** verdict that *looks* cross-family in the transcript and
+satisfies D-115 on paper while defeating it in fact. This audit's author family is glm, so a
+deepseek reviewer is not cross-family in the way the gate intends for the *re-review of the
+same finding set* the deepseek lane already reviewed on PR #13. Not accepted here.
+
+Requested instead, on the PR: re-review at `74b5fad` (comment
+`#issuecomment-6179406376`), and a formal reviewer request on `c03rad0r`
+(`requested_reviewers` verified via the REST API, not via `gh pr edit`, whose GraphQL path
+returned rc=0 while silently not applying the request). PR #13 also carries a pointer comment
+(`#issuecomment-6179414947`). **The BLOCKED verdict on #13 stands as history until a
+different-family reviewer returns APPROVED at `74b5fad`.**
+
+### 7. Commits in this pass
+
+| commit | what |
+| --- | --- |
+| `8755370` | `docs(evidence)`: mutation evidence for the gate recovery path |
+| `6b69d08` | merge `github/main` (`b9a50bf`) into `fix/gate-consumer-audit` — no conflicts |
+| `74b5fad` | `docs(audit)`: re-pin evidence to the merge; F3 gains the sixth consumer (`cvm-deepinfra`) + Merge note 2 |
+
+Pushed to `github` (`d450a1c..74b5fad`), read back via `git ls-remote`:
+`refs/heads/fix/gate-consumer-audit = 74b5fad81266425538315922193a044490abfe0c`.
+
+`merge_claim: head=74b5fad diff=matched claim=matched ci=success`
+
+---
+
 ## t_7233c336 — verification + merge pass (2026-10-14, offload worker)
 
 **Deliverable:** `docs/gate-consumer-audit.md` (the consumer audit with per-consumer grep evidence),
