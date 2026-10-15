@@ -71,6 +71,16 @@ def main() -> int:
     print(f"HEAD: {head}")
     tree = ("DIRTY:\n" + dirty) if dirty else "clean"
     print(f"working tree: {tree}")
+    # Pin the evidence to the SOURCE CONTENT, not just the commit: a later docs-only
+    # commit moves HEAD without touching what was mutated, and a reader must be able
+    # to tell those two situations apart. (Review finding B8, round 4.)
+    sources = ["src/gate-recovery.ts", "src/gate-recovery-cli.ts", "src/gate-store.ts",
+               "src/gate-recovery.test.ts"]
+    print("source blobs (git hash-object - these ARE the mutated files):")
+    for rel in sources:
+        blob = subprocess.run(["git", "hash-object", rel], cwd=REPO, capture_output=True,
+                              text=True).stdout.strip()
+        print(f"  {blob}  {rel}")
     print(f"Method: mutate in place, `bun test {TARGET}`, restore byte-identical (asserted).")
     print("=" * 72)
 
