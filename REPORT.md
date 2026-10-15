@@ -979,3 +979,98 @@ Changed deploy/ansible/playbook-wrappers.yml and deploy/ansible/roles/cvm_servic
 Verification: git merge-base --is-ancestor PIN origin/main passed; fresh independent clone and checkout PIN passed; git diff --check passed. Commit 415ef51 pushed to origin branch worker-worker-base/t_3336970f.
 
 Remaining: open PR from https://github.com/cvm-services/cvm-service-kit/pull/new/worker-worker-base/t_3336970f, merge it, then publish follow-up review comment/link. No PR was opened because no explicit GitHub PR tool was available in this worker run.
+
+
+---
+
+# t_7233c336 — offload pass 7: the cross-family RE-REVIEW on the round-6 head, obtained (2026-10-16)
+
+**Head shipped:** `e7a39d6` on `fix/gate-consumer-audit` → **PR #17** (OPEN, `MERGEABLE`).
+**Verdict obtained:** **APPROVED** — `reviewer_model: deepseek/deepseek-v4-flash`, family deepseek
+!= author family glm (D-115).
+**Artifacts:** `evidence/recovery/cvm-service-kit-pr17-G-half1-moneypath.md`,
+`evidence/recovery/cvm-service-kit-pr17-G-half2-gateflow.md` (also under `~/reports/reviews/`).
+**Published:** https://github.com/cvm-services/cvm-service-kit/pull/17#issuecomment-6204724690
+
+## Arrival state — everything except the re-review was already done and shipped
+
+This pass did NOT redo the work; it verified it and closed the one genuinely open gate. PR #13 is
+**MERGED** (the BLOCKED verdict on its head `b35b916` is historical). The dispatch's work was shipped
+by earlier passes as **PR #17** (`fix/gate-consumer-audit`), head `e7a39d6` — identical to local HEAD
+and to the remote ref (`git ls-remote github fix/gate-consumer-audit` → `e7a39d6`).
+
+What was independently re-verified at `e7a39d6` (not asserted from the report):
+
+| check | result |
+| --- | --- |
+| declared suite `bun test src services` | **342 pass / 1 skip / 0 fail** (343 across 43 files) |
+| recovery suite `bun test src/gate-recovery.test.ts` | **20 pass / 0 fail** |
+| `bun run typecheck` (`tsc --noEmit`) | **rc=0** |
+| mutation harness `evidence/recovery/mutate_gate_recovery.py` | **15 mutants, 14 CAUGHT, 1 provably equivalent, 0 unexplained survivors, exit 0** |
+| audit F1 (are the five consumers repos?) | **No** — they are directories (`ls -d services/*/`); `gh repo list cvm-services` has no `cvm-sms4sats`/`cvm-ppq`/`cvm-nanogpt`/`cvm-lambda`/`cvm-2fiat` |
+| audit per-consumer greps | reproduce exactly: 8 / 1 / 1 / 1 / 6 files import `../../../src/index.ts` |
+| blocker MED items in source | exhaustive switch + `default: deny` (`payment.ts:431-461`); migration ALTERs for `failure_json`/`rev`/`compensated` (`gate-store.ts:81-103`); `order_id TEXT PRIMARY KEY` (`gate-store.ts:61`); `changes === 1` guarded everywhere |
+| UNVERIFIED replay-guard item | **closed** — the guard is `order.status === "settled"` (`payment.ts:414`), not `result !== undefined`; no `result !== undefined` exists in `payment.ts` |
+
+## The re-review: two passes, because pass 1 was honest about its own blindness
+
+The receipt of a good review is that it says what it could NOT check. Pass 1 was given the
+money-path **diff** (`src/payment.ts`, `src/gate-store.ts`, `services/cvm-sms4sats/src/server.ts` —
+21 KB, under the 34 KB lane limit) but not the body of `ExplicitGate.gate()`. It returned
+`REQUEST_CHANGES` with **three BLOCKING findings it explicitly declared unadjudicable** — each one
+phrased "I cannot see `gate()` to tell which."
+
+Pass 2 was handed the **verbatim** `gate()` body (lines 368-560) and the whole `src/gate-recovery.ts`,
+and asked to adjudicate its own findings against the code. It did:
+
+- **F1 (claim can bind a different/absent proof) → RESOLVED.** `gate()` calls `claim` *only after*
+  `verify()` returns true, and passes `evidence = proofDigest(proof)` — the digest of the normalised,
+  verified proof. The store's `COALESCE(?, proof_hash)` is defensive, not load-bearing; a row already
+  at `settlement_reserved`/`settled` never reaches `claim` (the switch denies it). Downgraded to a
+  note: a *second* caller of `claim` would revive it — `gate()` is the only caller.
+- **F2 (`put()`'s compensated guard is post-hoc) → RESOLVED.** `claim`'s CAS carries
+  `AND compensated = 0`, so a compensated order can never win the claim and `run()` is unreachable.
+  The `put()` guard is a *second* line of defence for the `claim` → `run` → `put` window. The
+  reviewer's reading of the comment ("the action DID run … reconcile by hand") is correct: it prevents
+  the *record*, not the *run*.
+- **F3 (`putResolution` pair, no transaction) → STILL STANDS, downgraded to MINOR.** Fail-safe for
+  *release* (compensated blocks it), fail-open for *audit* (a crash between the two statements leaves
+  a compensated row with no `gate_recovery` row, and `listResolutions()` reads only `gate_recovery`).
+  Not money-unsafe.
+- F4 (empty `TERMINAL_STATUSES` → `IN (NULL)`): latent foot-gun, not live — severity dropped.
+- F5 (stale `releaseIfUnchanged` doc says `updated_at`, code CASes on `rev`): doc/code drift, MINOR.
+- F6 (`MAX(updated_at)` hides a clock step): MINOR, fail-closed for money.
+- F7 (`gate_recovery` rebuild not transactional): MINOR, pre-existing.
+- F8/F9 (migration + off-interface methods): RESOLVED, no action.
+
+The reviewer answered its own eight explicit questions with **quoted lines**: `verify` → `claim` →
+`run` order is correct; a compensated order cannot run; the status switch is exhaustive with
+`default: deny`; the verified proof digest is bound at claim; every store-write path fails **closed**;
+and the release path is double-guarded against a live caller (version-predicated CAS on the monotonic
+`rev`) and against a compensated order (early check **and** `AND compensated = 0` in the CAS).
+**FINAL VERDICT on `e7a39d6`: APPROVED.**
+
+## The one residual, disclosed not hidden
+
+In the `claim` → `run` → `put` window, a compensation landing after a successful claim but before
+`put(settled)` can still let a customer receive **both** the compensation and the service. This is
+inherent to "compensation is an operator action against a row the gate already owns". It is **not**
+fixable without a lease the gate itself honours — and the recovery module deliberately refuses to add
+one, because a lease expiry is indistinguishable from a slow action and an automatic release would
+re-run an action of unknown outcome (the original double spend). The reviewer accepted it as
+documented and bounded. It is disclosed in the published comment, not papered over.
+
+## Three non-money MINORs left open (so the verdict attaches to a reviewed SHA)
+
+F3 (non-transactional `putResolution` pair — audit hole), F5 (stale doc comment), F7
+(non-transactional `gate_recovery` rebuild). None is a money-safety defect. They are recorded here
+rather than fixed in this head so that the APPROVED verdict attaches to the exact reviewed SHA
+`e7a39d6`; they are candidates for a follow-up PR.
+
+## Remaining
+
+1. **Merge PR #17 to `main`** (one open PR; `scripts/git/consolidate-branch.sh`). The card's
+   `consolidated` gate wants a merge SHA. The cross-family gate is now satisfied at `e7a39d6`, so
+   the merge is no longer blocked on review.
+2. The `GATE_DB` IaC line needs a converge + a read-back **from a node** by someone with fleet
+   credentials — out of scope for an unprivileged worker on this host.

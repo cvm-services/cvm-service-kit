@@ -433,3 +433,36 @@ worked its findings.
 - NOT merged. Five rounds each returned REQUEST_CHANGES with at least one real defect (two of them
   introduced/failed-to-close by my own earlier fix). The newest head has NOT been re-reviewed, so
   the cross-family gate is unsatisfied and PR #17 stays open.
+
+## t_7233c336 — offload pass 7: the cross-family RE-REVIEW was obtained -> APPROVED (2026-10-16)
+
+- finding: the only outstanding gate on card t_7233c336 was a cross-family verdict on the round-6
+  head. Runs 1-6 all returned REQUEST_CHANGES; the newest head (e7a39d6) was unreviewed. | status:
+  DONE — obtained, APPROVED. | files: evidence/recovery/cvm-service-kit-pr17-G-half1-moneypath.md,
+  evidence/recovery/cvm-service-kit-pr17-G-half2-gateflow.md
+- What I did (verify, not redo): confirmed the whole deliverable is already on disk and shipped as
+  PR #17 (head e7a39d6 == local == remote via ls-remote), PR #13 is MERGED. Re-ran the declared
+  suite `bun test src services` = **342 pass / 1 skip / 0 fail**; recovery suite **20/20**;
+  `bun run typecheck` rc=0; mutation harness **15 mutants / 14 CAUGHT / 1 provably equivalent /
+  0 unexplained survivors / exit 0**. Re-ran the audit's per-consumer greps (8/1/1/1/6 files import
+  ../../../src/index.ts) and the F1 check (the five "consumers" are directories, NOT repos -
+  `gh repo list cvm-services` has no cvm-sms4sats/cvm-ppq/cvm-nanogpt/cvm-lambda/cvm-2fiat).
+- The re-review: two passes on the local price-first router lanes. **Pass 1** (money-path diff only)
+  honestly returned REQUEST_CHANGES with 3 BLOCKING findings it could not adjudicate without
+  `gate()` ("I cannot see gate() to tell which"). **Pass 2** was handed the VERBATIM `gate()` body +
+  `src/gate-recovery.ts`; it adjudicated its own findings: F1 RESOLVED (claim is called only after
+  verify, bound to `proofDigest(proof)`), F2 RESOLVED (claim's CAS carries `AND compensated = 0`,
+  so run() is unreachable for a compensated order; the claim->run->put race is a documented
+  BOUNDED residual), F3 downgraded to MINOR (audit hole, not money). FINAL: **APPROVED**.
+  reviewer_model: deepseek/deepseek-v4-flash (family deepseek != author family glm -> D-115).
+- Published to the PR: round-7 verdict comment
+  https://github.com/cvm-services/cvm-service-kit/pull/17#issuecomment-6204724690
+- Residual disclosed, not hidden: in the claim->run->put window a compensation can still let the
+  customer receive both the compensation and the service. Inherent to operator-compensation; not
+  fixable without a gate-honoured lease the recovery module deliberately refuses (an automatic
+  release would re-run an action of unknown outcome). Reviewer accepted it as documented/bounded.
+- NON-money MINORs left open (recorded so the verdict attaches to a reviewed SHA): F3 the
+  putResolution pair is not in one transaction (audit hole); F5 releaseIfUnchanged doc says
+  updated_at, code CASes on rev; F7 the gate_recovery rebuild is not transactional.
+- Remaining: merge PR #17 to main (one open PR; consolidate-branch.sh). The GATE_DB IaC converge +
+  node read-back is out of scope for an unprivileged worker here.
