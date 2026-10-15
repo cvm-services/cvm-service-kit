@@ -40,6 +40,13 @@ MUTATIONS = [
     ("M-B6b releaseReservation(): drop the fail-closed non-finite age guard", "src/gate-recovery.ts",
      'if (!Number.isFinite(ageMs) || ageMs <= leaseMs) {', 'if (ageMs <= leaseMs) {',
      None),
+    ("M-R4a releaseReservation(): status-only CAS (the ABA the round-4 review found)",
+     "src/gate-recovery.ts",
+     'const released = store.releaseIfUnchanged(orderId, order.updatedAt);',
+     'const released = store.claim(orderId, "settlement_reserved", "awaiting_payment");',
+     None),
+    ("M-R4b listResolutions(): order by `at` instead of insertion order", "src/gate-store.ts",
+     'ORDER BY seq ASC`', 'ORDER BY at ASC, seq ASC`', None),
 ]
 
 

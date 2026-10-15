@@ -138,9 +138,12 @@ export function releaseReservation(
   if (!Number.isFinite(ageMs) || ageMs <= leaseMs) {
     if (!opts.force) return { released: false, refusal: "lease_active", order, ageMs, leaseMs };
   }
-  // Same CAS the gate uses: if a live caller (or another operator) moved the row
-  // between the read above and here, this loses rather than double-claiming.
-  const released = store.claim(orderId, "settlement_reserved", "awaiting_payment");
+  // Version-predicated CAS: the row must still be the exact revision inspected
+  // above (`settlement_reserved` AND the same `updated_at`). A status-only CAS
+  // would match a row that moved away and back (release -> re-claim -> reserved),
+  // letting a STALE operator read cancel a live caller's claim without --force.
+  // (Review finding B1, round 4.)
+  const released = store.releaseIfUnchanged(orderId, order.updatedAt);
   if (!released) return { released: false, refusal: "raced", order, ageMs, leaseMs };
   return { released: true, order, ageMs, leaseMs };
 }

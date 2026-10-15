@@ -26,7 +26,7 @@ export interface CliIo {
 const USAGE = `gate-recovery - operator escape hatch for orders the gate will not retry
 
   list       --db <gate.sqlite> [--lease-min N]
-  release    --db <gate.sqlite> --order <id> [--force]
+  release    --db <gate.sqlite> --order <id> [--lease-min N] [--force]
   compensate --db <gate.sqlite> --order <id> --outcome refunded|abandoned --note <why>
 
   list       reports reservations that never wrote an outcome, terminal failures,
@@ -72,7 +72,7 @@ function parseFlags(argv: string[]): Flags | string {
   return { values, booleans };
 }
 
-function leaseMsOf(flags: Flags): number | string {
+function leaseMsOf(flags: Flags, command: string): number | string {
   const raw = flags.values.get("lease-min");
   if (raw === undefined) return DEFAULT_RESERVATION_LEASE_MS;
   const minutes = Number(raw);
@@ -82,9 +82,14 @@ function leaseMsOf(flags: Flags): number | string {
   // ever typing --force - the guard would be callable away, and the audit trail
   // would not show why. (Review finding B4.)
   if (minutes < DEFAULT_RESERVATION_LEASE_MS / 60_000) {
+    // Name the alternative only where it exists: `list` has no --force.
+    const alternative =
+      command === "release"
+        ? `use --force if you have checked the venue (the two are the same act, and --force is the honest one)`
+        : `the lease may only be raised, never lowered`;
     return (
       `--lease-min may not be lower than the ${DEFAULT_RESERVATION_LEASE_MS / 60_000}-minute default; ` +
-      `use --force if you have checked the venue (the two are the same act, and --force is the honest one)`
+      alternative
     );
   }
   return minutes * 60_000;
@@ -104,7 +109,7 @@ export async function main(argv: string[], io: CliIo = console): Promise<number>
     io.error(USAGE);
     return 2;
   }
-  const leaseMs = leaseMsOf(parsed);
+  const leaseMs = leaseMsOf(parsed, command);
   if (typeof leaseMs === "string") {
     io.error(`usage error: ${leaseMs}`);
     return 2;

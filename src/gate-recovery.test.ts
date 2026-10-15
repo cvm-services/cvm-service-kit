@@ -356,7 +356,7 @@ describe("gate recovery: round-2 review findings", () => {
       get: () => nanOrder,
       list: () => [nanOrder],
       listResolutions: () => [],
-      claim: () => {
+      releaseIfUnchanged: () => {
         claims++;
         return true;
       },
@@ -378,6 +378,73 @@ describe("gate recovery: round-2 review findings", () => {
     // --force remains the explicit, deliberate override.
     expect(releaseReservation(stub, "nan1", { force: true }).released).toBe(true);
     expect(claims).toBe(1);
+  }, 30_000);
+
+  test("B1 round-4: a STALE operator read cannot cancel a live caller's re-claim", () => {
+    // The exact interleaving the round-4 review described, driven THROUGH
+    // releaseReservation. A reads the row in `get()`; before A's CAS lands, B
+    // releases it and a caller C re-claims it back to `settlement_reserved` with a
+    // FRESH updated_at. A status-only CAS would match that status again and cancel
+    // C's live lease without --force. The version-predicated CAS must lose.
+    const { store } = mkStore();
+    crashAfterClaim(store, "aba3");
+    const observed = store.get("aba3")!;
+    expect(observed.status).toBe("settlement_reserved");
+
+    let interfered = false;
+    const racing = {
+      get: (id: string) => {
+        const row = store.get(id);
+        if (!interfered) {
+          interfered = true;
+          // B releases (with a long-expired view), then C re-claims.
+          expect(store.releaseIfUnchanged(id, observed.updatedAt)).toBe(true);
+          expect(store.claim(id, "awaiting_payment", "settlement_reserved")).toBe(true);
+        }
+        return row; // A's STALE snapshot: old updatedAt, expired lease
+      },
+      list: (s: Parameters<SqliteGateStore["list"]>[0]) => store.list(s),
+      listResolutions: () => store.listResolutions(),
+      releaseIfUnchanged: (id: string, exp: number) => store.releaseIfUnchanged(id, exp),
+      // Present so the mutation harness can reinstate the ORIGINAL status-only CAS
+      // (M-R4a) and watch this test catch it. The production path must NOT use it.
+      claim: (id: string, from: GateOrder["status"], to: GateOrder["status"]) =>
+        store.claim(id, from, to),
+    } as unknown as SqliteGateStore;
+
+    const out = releaseReservation(racing, "aba3", {
+      now: observed.updatedAt + 60 * MINUTE, // A believes the lease is long expired
+    });
+    expect(out.released).toBe(false);
+    expect(out.refusal).toBe("raced"); // NOT a silent success
+    // C's live claim survived: one owner, still reserved.
+    expect(store.get("aba3")!.status).toBe("settlement_reserved");
+  }, 30_000);
+
+  test("B5 round-4: the CURRENT compensation is the last WRITTEN, not the largest `at`", () => {
+    // Append-only correctness must not depend on the clock: a later correction
+    // written with a skewed-back `at` is still the current record.
+    const { store } = mkStore();
+    const failed = awaiting("skew1");
+    failed.status = "settlement_failed";
+    store.put(failed);
+
+    recordCompensation(store, "skew1", { outcome: "abandoned", note: "written first", now: 1000 });
+    recordCompensation(store, "skew1", {
+      outcome: "refunded",
+      note: "written second, clock skewed back",
+      now: 500,
+    });
+
+    // History keeps both, in insertion order ...
+    expect(store.listResolutions().map((r) => r.note)).toEqual([
+      "written first",
+      "written second, clock skewed back",
+    ]);
+    // ... and the operator sees the LAST WRITTEN record.
+    const report = findStuckOrders(store, { now: 60 * MINUTE });
+    expect(report.failed[0]!.resolution?.outcome).toBe("refunded");
+    store.close();
   }, 30_000);
 
   test("B5: the compensation log is APPEND-ONLY — a correction adds, it does not erase", async () => {

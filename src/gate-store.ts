@@ -181,6 +181,28 @@ export class SqliteGateStore implements GateOrderStore {
   }
 
   /**
+   * Release a reservation ONLY if the row is still exactly the revision the
+   * operator inspected: `settlement_reserved` AND the same `updated_at`.
+   *
+   * The status-only CAS the gate uses for its own transitions is NOT enough here.
+   * An operator reads the row, sees an expired lease, and then CASes some time
+   * later; in between, another operator may release the row and a retry caller may
+   * re-claim it, putting it back to `settlement_reserved` — a status the
+   * status-only CAS matches. The release would then cancel a LIVE claim without
+   * `--force`, and a second caller could start the same action. `updated_at` is
+   * set by every transition, so requiring it makes a stale read lose (as `raced`)
+   * instead of stealing the new owner's lease. (Review finding B1, round 4.)
+   */
+  releaseIfUnchanged(orderId: string, expectedUpdatedAt: number): boolean {
+    const res = this.db.run(
+      `UPDATE gate_orders SET status = 'awaiting_payment', updated_at = ?
+       WHERE order_id = ? AND status = 'settlement_reserved' AND updated_at = ?`,
+      [Date.now(), orderId, expectedUpdatedAt],
+    );
+    return Number(res.changes ?? 0) === 1;
+  }
+
+  /**
    * Append an operator compensation to the audit log. Deliberately an INSERT, not
    * an upsert: a second compensation (a correction, or a refund following an
    * abandonment) must ADD to the history rather than erase the first entry.
@@ -193,10 +215,15 @@ export class SqliteGateStore implements GateOrderStore {
     );
   }
 
-  /** The full compensation history, oldest first. Append-only: nothing is lost. */
+  /**
+   * The full compensation history, oldest first. Append-only: nothing is lost.
+   * Ordered by INSERTION (`seq`), not by `at`: the "current" record for an order
+   * must be the one written last, and a clock skew or an explicit `now` on a later
+   * correction must not resurrect an earlier entry. (Review finding, round 4.)
+   */
   listResolutions(): GateResolution[] {
     const rows = this.db
-      .query(`SELECT * FROM gate_recovery ORDER BY at ASC, seq ASC`)
+      .query(`SELECT * FROM gate_recovery ORDER BY seq ASC`)
       .all() as any[];
     return rows.map((r) => ({
       orderId: r.order_id,
