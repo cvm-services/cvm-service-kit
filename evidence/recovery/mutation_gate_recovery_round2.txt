@@ -1,41 +1,50 @@
 ========================================================================
 MUTATION EVIDENCE - gate recovery path (round-2 review findings)
-HEAD: 99dc2e672911771ca30d1b83dd189a802f12406f
+HEAD: 6e3fd47a225e8922d32f80b13ee298fe2a4eeadc
 working tree: clean
 source blobs (git hash-object - these ARE the mutated files):
-  55e5276fecccc8bedb62bd8f9431a25136d1ecd9  src/gate-recovery.ts
-  46edd457d6053617c97fbb9f117b9d5e08a8187f  src/gate-recovery-cli.ts
-  d66bf2020b848844af75f4df5500e199da99432a  src/gate-store.ts
-  7e44f7a9008b5cd93cafcd050d374f83ccdbb61c  src/gate-recovery.test.ts
+  cadc02d5092a867b919cb89e5f679a23fe666e8f  src/gate-recovery.ts
+  1e4afb28372d05c4810c3c9fc4300950be4c4f0c  src/gate-recovery-cli.ts
+  7fa9dfe050521af231b5fdf042a2265b73b4da00  src/gate-store.ts
+  090cef154e6d4be19c8813edee6d57298b357ff0  src/gate-recovery.test.ts
 Method: mutate in place, `bun test src/gate-recovery.test.ts`, restore byte-identical (asserted).
 ========================================================================
 
-BASELINE (unmutated): 12 pass / 0 fail
+BASELINE (unmutated): 16 pass / 0 fail
 
 M-B2  drop the legacy 'paid' bucket from the stuck report
-    11 pass / 1 fail -> CAUGHT
-      (fail) gate recovery: round-2 review findings > B2: a legacy 'paid' row is surfaced AND compensatable (it had no surface at all) [32.81ms]
+    15 pass / 1 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B2: a legacy 'paid' row is surfaced AND compensatable (it had no surface at all) [11.09ms]
 M-B3  remove settlement_reserved from COMPENSATABLE_STATUSES
-    11 pass / 1 fail -> CAUGHT
-      (fail) gate recovery: compensating a terminal failure > a compensation is recorded durably and does NOT license a retry [65.20ms]
+    13 pass / 3 fail -> CAUGHT
+      (fail) gate recovery: compensating a terminal failure > a compensation is recorded durably and does NOT license a retry [21.34ms]
 M-B4  remove the --lease-min lower bound (shrink the guard instead of --force)
-    11 pass / 1 fail -> CAUGHT
-      (fail) gate recovery: round-2 review findings > B4/B1: a live lease cannot be released without --force, and --lease-min cannot be lowered [63.67ms]
-M-B5  revert putResolution to an upsert (the log loses history)
-    8 pass / 4 fail -> CAUGHT
-      (fail) gate recovery: compensating a terminal failure > a compensation is recorded durably and does NOT license a retry [33.17ms]
+    15 pass / 1 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B4/B1: a live lease cannot be released without --force, and --lease-min cannot be lowered [22.39ms]
+M-B5  listResolutions(): collapse the log to one record per order (history lost)
+    14 pass / 2 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B5 round-4: the CURRENT compensation is the last WRITTEN, not the largest `at` [16.98ms]
 M-B6  classify(): drop the Number.isFinite guard on the lease flag
-    12 pass / 0 fail -> SURVIVED but EQUIVALENT: ageMs is NaN exactly when Number.isFinite(ageMs) is false, and `NaN > x` is false, so both expressions yield false for every input. The guard is intent, not behaviour.
+    16 pass / 0 fail -> SURVIVED but EQUIVALENT: ageMs is NaN exactly when Number.isFinite(ageMs) is false, and `NaN > x` is false, so both expressions yield false for every input. The guard is intent, not behaviour.
 M-B6b releaseReservation(): drop the fail-closed non-finite age guard
-    11 pass / 1 fail -> CAUGHT
-      (fail) gate recovery: round-2 review findings > B6: an un-computable age FAILS CLOSED instead of reading as long-expired [0.70ms]
+    14 pass / 2 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B6: an un-computable age FAILS CLOSED instead of reading as long-expired [0.61ms]
 M-R4a releaseReservation(): status-only CAS (the ABA the round-4 review found)
-    10 pass / 2 fail -> CAUGHT
-      (fail) gate recovery: round-2 review findings > B6: an un-computable age FAILS CLOSED instead of reading as long-expired [0.44ms]
+    14 pass / 2 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B6: an un-computable age FAILS CLOSED instead of reading as long-expired [0.54ms]
 M-R4b listResolutions(): order by `at` instead of insertion order
-    11 pass / 1 fail -> CAUGHT
-      (fail) gate recovery: round-2 review findings > B5 round-4: the CURRENT compensation is the last WRITTEN, not the largest `at` [54.88ms]
+    15 pass / 1 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B5 round-4: the CURRENT compensation is the last WRITTEN, not the largest `at` [19.24ms]
+M-R5a releaseReservation(): drop the compensated-order refusal (H1)
+    15 pass / 1 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > H1 round-5: a COMPENSATED reservation can never be released (no refund AND service) [23.38ms]
+M-R5b putResolution(): unconditional insert (no CAS on the order row) (H2)
+    10 pass / 6 fail -> CAUGHT
+      (fail) gate recovery: compensating a terminal failure > a compensation is recorded durably and does NOT license a retry [12.01ms]
+M-R5c claim(): stop advancing the monotonic rev (M1 - the version must move)
+    15 pass / 1 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B1 round-4 / M1 round-5: a STALE read cannot cancel a live re-claim — even in the same ms [19.94ms]
 
-POST-RESTORE: 12 pass / 0 fail (source byte-identical)
+POST-RESTORE: 16 pass / 0 fail (source byte-identical)
 
 RESULT: 0 unexplained survivor(s)

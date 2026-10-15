@@ -391,3 +391,22 @@ worked its findings.
   `deno task test` 29 passed / 0 failed.
 - mutation at the final head: baseline 12/0, M-B2/M-B3/M-B4/M-B5/M-B6b/M-R4a/M-R4b CAUGHT,
   M-B6 provably equivalent, 0 unexplained survivors, exit 0.
+
+## t_7233c336 — offload pass 5: the fourth review found 5 more, incl. one my own fix created (2026-10-15)
+
+- round-5 review (cold, current source) -> REQUEST_CHANGES, artifact
+  ~/reports/reviews/cvm-service-kit-pr17-D-final.md. Five real findings, ONE CREATED BY MY OWN
+  round-3 fix: making a reservation compensatable (B3) opened a refund-AND-service hole, because
+  `releaseReservation` never checked for a recorded compensation.
+- FIXED: (H1) a compensated order can never be released, with or without --force;
+  (H2) `putResolution` is now a conditional INSERT gated on (order_id, status, rev), so a
+  compensation cannot be recorded for a row that settled in between; (M1) `gate_orders.rev`, a
+  MONOTONIC revision incremented on every transition, replaces `updated_at` as the CAS version
+  (ms-resolution timestamps collide inside one millisecond); (M2) a zero/epoch `updatedAt` now
+  fails closed too (finite is not enough); (L1) a flag a command does not honour is a usage
+  error instead of being silently ignored.
+- tests: recovery 16/16 (was 12). green: typecheck rc=0; `bun test src services` 338 pass /
+  1 skip / 0 fail; `deno check` rc=0; `deno task test` 29 passed / 0 failed.
+- mutation at the final head: 12 mutants, 10 CAUGHT (including the three new ones), M-B6
+  provably equivalent, and the harness REPORTS a drifted anchor as a failure - two anchors had
+  drifted with the round-5 source and were repointed rather than left silently vacuous.

@@ -756,6 +756,60 @@ both print the source blob hashes:
 - `evidence/recovery/cli_smoke.sh` → `cli_smoke_round2.txt` (prints the literal HEAD and the
   source blobs; each exclusion of its own transcript from the dirty check is stated in-line)
 
+## Round-5 cross-family review (2026-10-15) — five more real findings, including one my own fix created
+
+Fourth review this round, a COLD review of the current source (not a delta). Artifact:
+`~/reports/reviews/cvm-service-kit-pr17-D-final.md` (`VERDICT: REQUEST_CHANGES`).
+It found five more real issues, **one of them created by the round-3 fix itself** — the loop is
+still paying for itself.
+
+### H1 (HIGH) — the B3 fix opened a refund-and-service hole
+
+Round 3 made a `settlement_reserved` order compensatable, because the runbook told operators to
+do exactly that. But `releaseReservation` never checked for a recorded compensation, so after an
+operator recorded `refunded` for a crashed-after-venue reservation, a later `release` (after the
+lease expired, or with `--force`) would move the row back and a retry would run the action — the
+customer holding **both the refund and the service**.
+
+**Fixed**: `releaseReservation` refuses any order with a recorded resolution (`compensated`),
+with or without `--force`. A compensation decides the money; releasing afterwards would undo
+that decision into a double benefit. Also documented in the runbook (a compensated order is
+CLOSED) and in the CLI refusal text. Test: `H1`; **mutation M-R5a → CAUGHT**.
+
+### H2 (HIGH) — a compensation could be recorded against an order that had already settled
+
+`recordCompensation` read the row, then wrote with no CAS at all, so a caller settling in
+between produced a refund record for a successful order. **Fixed**: `putResolution` is now a
+single conditional `INSERT ... SELECT ... WHERE EXISTS (SELECT 1 FROM gate_orders WHERE order_id
+= ? AND status = ? AND rev = ?)` — the append happens only while the row is still the revision
+the operator judged; otherwise `recorded: false, refusal: "raced"`. Test: `H2`;
+**mutation M-R5b → CAUGHT**.
+
+### M1 (MED) — `updated_at` is not a version: same-millisecond ABA
+
+Round 4's `releaseIfUnchanged` compared `updated_at`, which is `Date.now()` **milliseconds**.
+Two transitions inside one millisecond produce the same value, so the ABA survived at that
+resolution. **Fixed with a monotonic revision**: `gate_orders.rev` (`INTEGER NOT NULL DEFAULT 0`
++ `ALTER TABLE` migration) is incremented by `claim`, `put` and `releaseIfUnchanged` on *every*
+transition, and the release CAS predicates on `rev`. A version can no longer repeat.
+Test: `B1/M1` (asserts the row advances exactly two revisions across release + re-claim);
+**mutation M-R5c (stop advancing `rev`) → CAUGHT**.
+
+### M2 (MED) — a zero/epoch `updatedAt` also skipped the lease guard
+
+Round 3's guard only rejected *non-finite* ages; `0` is finite, so `now - 0` is an enormous age
+and the release proceeded unforced. **Fixed**: `usableAge()` requires finite **and positive**,
+at both sites. Test: `M2`.
+
+### L1 (LOW) — the CLI accepted and silently ignored per-command flags
+
+`compensate --force` and `release --outcome refunded` parsed fine and did nothing, implying
+guards that do not exist. **Fixed**: `COMMAND_FLAGS` — a flag a command does not honour is now a
+usage error (`--force is not a valid option for `compensate``). Test: `L1`.
+
+The reviewer confirmed **B2, B3, B4, B6 closed**, and re-stated B1 as "conditionally closed"
+pending exactly what M1 addressed — which is now in place.
+
 ## Independent self-check (SAME family — explicitly NOT a D-115 review)
 
 Every non-flash model lane was capacity-exhausted on this host when the pass ran —
