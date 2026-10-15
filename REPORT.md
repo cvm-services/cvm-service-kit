@@ -1074,3 +1074,17 @@ rather than fixed in this head so that the APPROVED verdict attaches to the exac
    the merge is no longer blocked on review.
 2. The `GATE_DB` IaC line needs a converge + a read-back **from a node** by someone with fleet
    credentials — out of scope for an unprivileged worker on this host.
+
+## UPDATE (2026-10-16, pass 7 cont.) — MERGED
+
+PR #17 is **MERGED**. `consolidated: merged c0fb36b8d8256215957ab611aa53313153fac18d` — the
+merge commit is an ancestor of `github/main` (`git merge-base --is-ancestor` YES), and GitHub's
+main tip equals it (`git ls-remote github refs/heads/main`). Head merged was `cc9671f` (the round-7
+review artifacts), CI `bun`=SUCCESS `deno`=SUCCESS at that head, `mergeable: MERGEABLE`.
+
+ngit push of main is **blocked on this host**: `git push ngit` fails with "authentication required;
+run 'ngit account login'" and `ngit account list` reports "no accounts available" — no nostr signer
+nsec is configured for account `c08r4d0r` here, and the ngit remote is a different npub
+(`npub1nng5mxkdh2mu593twukfr7j3fk5wxfy0v8ujf0e5g8nwwtzlphhqksqpew`). GitHub main is authoritative
+and correct; ngit main remains at `b9a50bf` pending a signer. This is an environment limitation,
+not a code problem.
