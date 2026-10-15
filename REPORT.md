@@ -128,25 +128,37 @@ from crashed), and the **cutover window** (§ F5b) for a service moving from the
 
 ## 6. State at handoff
 
-- Branch `fix/gate-consumer-audit` at **`33071d1`**, pushed to `github` and **read back via
-  `git ls-remote`**. CI on that head: **bun SUCCESS, deno SUCCESS**; `mergeable: MERGEABLE`,
-  `mergeStateStatus: CLEAN`.
-- PR #17 updated with the full findings/evidence write-up
+- Branch `fix/gate-consumer-audit` at **`94f55ed`**, pushed to `github` and **read back via
+  `git ls-remote`**.
+- PR #17 updated with the findings/evidence write-up
   (https://github.com/cvm-services/cvm-service-kit/pull/17#issuecomment-6194454622).
-- **PR #17 is NOT merged.** It is a fleet-owned repo (default branch = `main`), so the
-  consolidation rule says merge — but a merge requires a cross-family verdict on the *merged
-  head*, and no round has returned APPROVE. Merging on a stack of REQUEST_CHANGES verdicts whose
-  findings are fixed-but-unre-reviewed would be exactly the "review published" theatre the
-  working agreement exists to prevent. The remaining step is a verdict on `33071d1` (round F);
-  then merge.
-- Remaining work, in order:
-  1. Read `~/reports/reviews/cvm-service-kit-pr17-F-final.md` when the round-F run completes
-     (started against `33071d1`; admitted by the lane on the first attempt, generation
-     in progress at the time of writing). If it is `APPROVE`, merge PR #17 and update the audit
-     doc with the verdict. If `REQUEST_CHANGES`, work the findings first.
-  2. Merge PR #17 into `main` (or, if a fork-style flow is wanted, keep exactly one open PR).
-  3. The `GATE_DB` IaC line needs a real converge + read-back on a managed node by someone with
-     fleet credentials — out of scope for an unprivileged worker on this host.
+- **PR #17 is NOT merged, and that is deliberate.** Five review rounds were obtained; **all five
+  returned `REQUEST_CHANGES`**, and every round found at least one real defect — including two
+  (round 5's refund-and-service hole, round 6's C1/C2) created or left open by my own previous
+  fix. The findings are all fixed with tests and mutation evidence, **but the newest head has not
+  been re-reviewed**, so the cross-family gate is unsatisfied. It is a fleet-owned repo, so the
+  consolidation rule says merge — merging on a stack of unreviewed `REQUEST_CHANGES` fixes is
+  exactly the "review published" theatre the working agreement exists to prevent.
+- **Remaining work, in order:**
+  1. Obtain a cross-family verdict on `94f55ed` (the round-6 re-review). If `APPROVE`, merge
+     PR #17 to `main` and record the verdict in the audit doc. If `REQUEST_CHANGES`, work the
+     findings. The lane recipe is in §2 — one lane serves (`kimi-k2.7-code` → `deepseek-flash`),
+     ~34 KB is the largest prompt admitted, `--max-tokens 60000`, retry through bursts.
+  2. Merge PR #17 (one open PR; `consolidate-branch.sh`).
+  3. The `GATE_DB` IaC line needs a converge + a read-back **from a node** by someone with fleet
+     credentials — out of scope for an unprivileged worker here.
+
+### What round 6 changed (after the first version of this report)
+
+Round 6 found the **root cause** of the release race that round 5 had only narrowed: the
+compensation did not version the order row, so "check the log, then CAS" was still two steps.
+Now `gate_orders.compensated` is set **and** `rev` advanced by the compensation CAS, the release
+CAS requires `compensated = 0`, and `put` refuses (and throws on) recording a compensated order as
+settled — closing the refund-AND-service path in both directions. Order identity is also refreshed
+on a reused `orderId` (the new generation no longer inherits the old invoice/amount or its
+compensation). Evidence at the final head: recovery **20/20**, full suite **342 pass / 1 skip /
+0 fail**, `deno task test` 29/0, and **15 mutants — 14 CAUGHT, 1 provably equivalent, 0
+unexplained survivors**.
 
 ---
 
