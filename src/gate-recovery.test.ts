@@ -526,6 +526,102 @@ describe("gate recovery: round-2 review findings", () => {
     store.close();
   }, 30_000);
 
+  test("C1 round-6: a compensation recorded BETWEEN the check and the CAS still blocks the release", () => {
+    // The round-6 critical: `releaseReservation` used to read the compensation log
+    // as a separate step, so a compensation landing in the gap left the CAS to
+    // succeed. `putResolution` now advances `rev`, and the release CAS predicates
+    // on `rev AND compensated = 0`, so the release must LOSE.
+    const { store } = mkStore();
+    crashAfterClaim(store, "gap1");
+    const observed = store.get("gap1")!;
+
+    let interfered = false;
+    const racing = {
+      get: (id: string) => {
+        const row = store.get(id); // A's snapshot: not yet compensated
+        if (!interfered) {
+          interfered = true;
+          // The operator compensates in the gap between A's read and A's CAS.
+          expect(recordCompensation(store, id, { outcome: "refunded", note: "in the gap" }).recorded)
+            .toBe(true);
+        }
+        return row;
+      },
+      list: (s: Parameters<SqliteGateStore["list"]>[0]) => store.list(s),
+      listResolutions: () => store.listResolutions(),
+      releaseIfUnchanged: (id: string, exp: number) => store.releaseIfUnchanged(id, exp),
+    } as unknown as SqliteGateStore;
+
+    const out = releaseReservation(racing, "gap1", {
+      now: observed.updatedAt + 60 * MINUTE,
+      leaseMs: DEFAULT_RESERVATION_LEASE_MS,
+    });
+    expect(out.released).toBe(false);
+    expect(out.refusal).toBe("raced"); // the row moved (compensated), not a silent release
+    const after = store.get("gap1")!;
+    expect(after.status).toBe("settlement_reserved");
+    expect(after.compensated).toBe(true);
+  }, 30_000);
+
+  test("C2 round-6: a compensated order can never be RECORDED as settled (no refund AND service)", () => {
+    const { store } = mkStore();
+    crashAfterClaim(store, "settle1");
+    expect(recordCompensation(store, "settle1", { outcome: "refunded", note: "venue delivered" }).recorded)
+      .toBe(true);
+
+    // The original caller finishes and tries to record success.
+    const done = store.get("settle1")!;
+    done.status = "settled";
+    done.result = { sent: "yes" };
+    expect(() => store.put(done)).toThrow(/compensated by an operator/);
+
+    // The row did NOT become settled, and no cached result was stored.
+    const after = store.get("settle1")!;
+    expect(after.status).toBe("settlement_reserved");
+    expect(after.result).toBeUndefined();
+    store.close();
+  }, 30_000);
+
+  test("H3/H4 round-6: a reused orderId starts a NEW generation - identity refreshed, compensation cleared", () => {
+    const { store } = mkStore();
+    // Generation 1: a different tool, amount and invoice.
+    const old = awaiting("gen1");
+    old.tool = "tool:send_sms";
+    old.amountSats = 111;
+    old.status = "settlement_failed";
+    store.put(old);
+    expect(recordCompensation(store, "gen1", { outcome: "refunded", note: "gen 1" }).recorded).toBe(true);
+    expect(store.get("gen1")!.compensated).toBe(true);
+
+    // Generation 2 reuses the orderId with a NEW identity, back to awaiting_payment.
+    const fresh = awaiting("gen1");
+    fresh.tool = "tool:place_order";
+    fresh.amountSats = 5022;
+    store.put(fresh);
+
+    const row = store.get("gen1")!;
+    // Identity refreshed: the new payment is NOT verified against the old invoice.
+    expect(row.tool).toBe("tool:place_order");
+    expect(row.amountSats).toBe(5022);
+    expect(row.status).toBe("awaiting_payment");
+    // Compensation cleared: a new generation is not the old one's refund.
+    expect(row.compensated).toBe(false);
+    const report = findStuckOrders(store, { now: 60 * MINUTE });
+    expect(report.failed).toHaveLength(0); // gen 1's record is not re-attached
+    store.close();
+  }, 30_000);
+
+  test("L8 round-6: `updated_at` never runs backwards (the lease-age hint must not lie)", () => {
+    const { store } = mkStore();
+    const o = awaiting("mono1");
+    o.updatedAt = 10_000;
+    store.put(o);
+    o.updatedAt = 5_000; // a stale caller writes an older timestamp
+    store.put(o);
+    expect(store.get("mono1")!.updatedAt).toBe(10_000);
+    store.close();
+  }, 30_000);
+
   test("B5 round-4: the CURRENT compensation is the last WRITTEN, not the largest `at`", () => {
     // Append-only correctness must not depend on the clock: a later correction
     // written with a skewed-back `at` is still the current record.

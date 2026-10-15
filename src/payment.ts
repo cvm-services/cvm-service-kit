@@ -273,6 +273,15 @@ export interface GateOrder {
    */
   proofHash?: string;
   /**
+   * True once an operator has resolved the MONEY for this order generation (a
+   * refund or an explicit abandonment). It is a flag on the order row, not just a
+   * row in the compensation log, for two reasons: the release CAS can then test it
+   * in the SAME statement that moves the order (a separate read leaves a race), and
+   * a reused `orderId` starts a new generation un-compensated.
+   * (Review findings C1/H4, round 6.)
+   */
+  compensated?: boolean;
+  /**
    * Monotonic revision, incremented by store on EVERY mutation of the row.
    *
    * A wall-clock `updatedAt` is not a version: two transitions inside one

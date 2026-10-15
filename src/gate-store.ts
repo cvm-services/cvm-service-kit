@@ -24,7 +24,20 @@ export interface GateResolution {
  * terminal-status list in `payment.ts` so the two bundled stores cannot drift.
  * Hardcoded string literals (not caller input), so interpolating them is safe.
  */
-const TERMINAL_STATUS_SQL = TERMINAL_STATUSES.map((s) => `'${s}'`).join(", ");
+// `NULL` when the list is empty: `IN ()` is a SQL syntax error, and an empty
+// terminal list must degrade to "matches nothing", not break every `put`.
+// (Review finding M6, round 6.)
+const TERMINAL_STATUS_SQL = TERMINAL_STATUSES.length
+  ? TERMINAL_STATUSES.map((s) => `'${s}'`).join(", ")
+  : "NULL";
+
+/**
+ * The new-generation predicate: a write that moves a TERMINAL row back to
+ * `awaiting_payment` is a NEW order on a reused orderId, so the previous
+ * generation's identity (invoice, amount, tool, caller) and its compensation must
+ * not be inherited. (Review findings H3/H4, round 6.)
+ */
+const IS_NEW_GENERATION = `excluded.status = 'awaiting_payment' AND gate_orders.status IN (${TERMINAL_STATUS_SQL})`;
 
 /**
  * Durable implementation of the payment gate's order store. Without this, a
@@ -55,6 +68,7 @@ export class SqliteGateStore implements GateOrderStore {
         failure_json TEXT,
         proof_hash TEXT,
         rev INTEGER NOT NULL DEFAULT 0,
+        compensated INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )`);
@@ -78,6 +92,15 @@ export class SqliteGateStore implements GateOrderStore {
     // (Review finding M1, round 5.)
     if (!columns.some((c) => c.name === "rev")) {
       this.db.run(`ALTER TABLE gate_orders ADD COLUMN rev INTEGER NOT NULL DEFAULT 0`);
+    }
+    // `compensated`: whether an operator has resolved the money for this order
+    // GENERATION. It lives on the order row (not only in the log) so that
+    // `releaseReservation` can check it in the same CAS that moves the row, and so
+    // that a reused orderId starts a new generation un-compensated. Without this
+    // the compensated check was a separate read and a concurrent compensation
+    // slipped through it. (Review findings C1/H4/M5, round 6.)
+    if (!columns.some((c) => c.name === "compensated")) {
+      this.db.run(`ALTER TABLE gate_orders ADD COLUMN compensated INTEGER NOT NULL DEFAULT 0`);
     }
     // Recovery records are an APPEND-ONLY log: every compensation is kept, so the
     // trail can show a refund followed by a correction (review finding B5). The
@@ -124,6 +147,7 @@ export class SqliteGateStore implements GateOrderStore {
       failure: row.failure_json ? JSON.parse(row.failure_json) : undefined,
       proofHash: row.proof_hash ?? undefined,
       rev: row.rev ?? undefined,
+      compensated: row.compensated === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -186,7 +210,7 @@ export class SqliteGateStore implements GateOrderStore {
     const res = this.db.run(
       `UPDATE gate_orders SET status = ?, updated_at = ?, rev = rev + 1,
                              proof_hash = COALESCE(?, proof_hash)
-       WHERE order_id = ? AND status = ?`,
+       WHERE order_id = ? AND status = ? AND compensated = 0`,
       [to, Date.now(), proofHash ?? null, orderId, from],
     );
     return Number(res.changes ?? 0) === 1;
@@ -208,7 +232,7 @@ export class SqliteGateStore implements GateOrderStore {
   releaseIfUnchanged(orderId: string, expectedRev: number): boolean {
     const res = this.db.run(
       `UPDATE gate_orders SET status = 'awaiting_payment', updated_at = ?, rev = rev + 1
-       WHERE order_id = ? AND status = 'settlement_reserved' AND rev = ?`,
+       WHERE order_id = ? AND status = 'settlement_reserved' AND rev = ? AND compensated = 0`,
       [Date.now(), orderId, expectedRev],
     );
     return Number(res.changes ?? 0) === 1;
@@ -227,22 +251,27 @@ export class SqliteGateStore implements GateOrderStore {
    * the first entry. Readers that want "the current state" take the LAST record.
    */
   putResolution(resolution: GateResolution, expect: { status: GateOrderStatus; rev: number }): boolean {
-    const res = this.db.run(
-      `INSERT INTO gate_recovery (order_id, outcome, note, at)
-       SELECT ?, ?, ?, ?
-       WHERE EXISTS (SELECT 1 FROM gate_orders
-                     WHERE order_id = ? AND status = ? AND rev = ?)`,
-      [
-        resolution.orderId,
-        resolution.outcome,
-        resolution.note,
-        resolution.at,
-        resolution.orderId,
-        expect.status,
-        expect.rev,
-      ],
+    // The order row FIRST, as the guarded CAS: `compensated = 1` AND `rev + 1` in
+    // the same statement. Advancing `rev` here is what makes the compensation part
+    // of the order's VERSION, so a release CAS taken before the compensation loses
+    // instead of slipping through the gap between a separate compensated-check and
+    // the release. (Review findings C1/M5, round 6.)
+    const claimed = this.db.run(
+      `UPDATE gate_orders SET compensated = 1, rev = rev + 1
+       WHERE order_id = ? AND status = ? AND rev = ?`,
+      [resolution.orderId, expect.status, expect.rev],
     );
-    return Number(res.changes ?? 0) === 1;
+    if (Number(claimed.changes ?? 0) !== 1) return false;
+    // Then the audit row. Deliberately two statements, not a transaction: the
+    // guarded UPDATE above is the mutual exclusion, and if the process dies
+    // between them the row is left `compensated` with a missing note - fail-SAFE
+    // (releases stay blocked), and the operator sees `compensated` with no note
+    // and appends one. The reverse order would allow a note with no block.
+    this.db.run(
+      `INSERT INTO gate_recovery (order_id, outcome, note, at) VALUES (?, ?, ?, ?)`,
+      [resolution.orderId, resolution.outcome, resolution.note, resolution.at],
+    );
+    return true;
   }
 
   /**
@@ -269,7 +298,7 @@ export class SqliteGateStore implements GateOrderStore {
   }
 
   put(order: GateOrder): void {
-    this.db.run(
+    const res = this.db.run(
       `INSERT INTO gate_orders (order_id, tool, caller, amount_sats, invoice_json,
                                 status, result_json, failure_json, proof_hash,
                                 created_at, updated_at)
@@ -280,23 +309,37 @@ export class SqliteGateStore implements GateOrderStore {
          -- COALESCE: a write that omits the digest must never clear the binding
          -- a claim recorded (only a fresh claim sets one).
          --
-         -- EXCEPT when the write moves a TERMINAL row back to awaiting_payment:
-         -- that is a new order generation on a reused orderId, so the previous
-         -- generation's binding is dropped rather than inherited (inheriting it
-         -- would settle the new order bound to the previous payer's digest).
+         -- EXCEPT in a NEW GENERATION: a write that moves a TERMINAL row back to
+         -- awaiting_payment is a new order on a reused orderId, so the previous
+         -- generation's binding, IDENTITY (tool/caller/amount/invoice/created_at)
+         -- and COMPENSATION must not be inherited. Inheriting the identity would
+         -- verify the new payment against the old invoice and amount (review
+         -- findings H3/H4, round 6); inheriting the compensation would leave a
+         -- fresh order permanently un-releasable.
          -- DENY-LIST HAZARD: a terminal status missing from this list fails
          -- toward the old bug (R2-3). The list is INTERPOLATED from
          -- TERMINAL_STATUSES in payment.ts, so the memory store and this store
          -- cannot disagree; replay_binding.test.ts pins both directions of that
          -- constant (an entry deleted, and an entry added without being mirrored).
+         tool=CASE WHEN ${IS_NEW_GENERATION} THEN excluded.tool ELSE gate_orders.tool END,
+         caller=CASE WHEN ${IS_NEW_GENERATION} THEN excluded.caller ELSE gate_orders.caller END,
+         amount_sats=CASE WHEN ${IS_NEW_GENERATION} THEN excluded.amount_sats ELSE gate_orders.amount_sats END,
+         invoice_json=CASE WHEN ${IS_NEW_GENERATION} THEN excluded.invoice_json ELSE gate_orders.invoice_json END,
+         created_at=CASE WHEN ${IS_NEW_GENERATION} THEN excluded.created_at ELSE gate_orders.created_at END,
+         compensated=CASE WHEN ${IS_NEW_GENERATION} THEN 0 ELSE gate_orders.compensated END,
          proof_hash=CASE
-           WHEN excluded.status = 'awaiting_payment'
-            AND gate_orders.status IN (${TERMINAL_STATUS_SQL})
-           THEN excluded.proof_hash
+           WHEN ${IS_NEW_GENERATION} THEN excluded.proof_hash
            ELSE COALESCE(excluded.proof_hash, gate_orders.proof_hash)
          END,
          rev=gate_orders.rev + 1,
-         updated_at=excluded.updated_at`,
+         -- Monotonic: updated_at is the operator's lease-age hint, and the age
+         -- must never run backwards. (Review finding L8, round 6.)
+         updated_at=MAX(excluded.updated_at, gate_orders.updated_at)
+       -- A compensated order can never be recorded as SETTLED: the operator has
+       -- already resolved the money (usually a refund), so accepting the success
+       -- write would hand the customer both. The guard is IN the statement, so it
+       -- cannot race the way a separate read would. (Review finding C2, round 6.)
+       WHERE gate_orders.compensated = 0 OR excluded.status <> 'settled'`,
       [
         order.orderId,
         order.tool,
@@ -311,5 +354,13 @@ export class SqliteGateStore implements GateOrderStore {
         order.updatedAt,
       ],
     );
+    // changes === 0 on the UPDATE branch means the guard above refused it. Report
+    // that as an error rather than silently dropping a settlement: the action DID
+    // run, and the operator must reconcile by hand.
+    if (order.status === "settled" && Number(res.changes ?? 0) !== 1) {
+      throw new Error(
+        `order ${order.orderId} was compensated by an operator; refusing to record it as settled`,
+      );
+    }
   }
 }

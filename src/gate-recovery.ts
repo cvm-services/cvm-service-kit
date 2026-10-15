@@ -100,7 +100,12 @@ export function findStuckOrders(store: SqliteGateStore, opts: InspectOptions = {
   const leaseMs = opts.leaseMs ?? DEFAULT_RESERVATION_LEASE_MS;
   const resolutions = new Map(store.listResolutions().map((r) => [r.orderId, r]));
   const bucket = (statuses: GateOrder["status"]) =>
-    store.list(statuses).map((o) => classify(o, now, leaseMs, resolutions.get(o.orderId)));
+    store.list(statuses).map((o) =>
+      // Attach a compensation ONLY to the generation that owns it: the log is keyed
+      // by orderId alone, so a reused orderId would otherwise inherit the previous
+      // generation's resolution. (Review finding H4, round 6.)
+      classify(o, now, leaseMs, o.compensated ? resolutions.get(o.orderId) : undefined),
+    );
   return {
     now,
     leaseMs,
@@ -143,10 +148,16 @@ export function releaseReservation(
 
   // A COMPENSATED order is closed for business. `recordCompensation` deliberately
   // accepts a reservation (the runbook's crashed-after-venue case), and a
-  // compensation is a decision about the money — usually a refund. Releasing it
+  // compensation is a decision about the money - usually a refund. Releasing it
   // afterwards would let a retry run the action, so the customer could end up with
-  // BOTH the refund and the service. (Review finding H1, round 5.)
-  if (store.listResolutions().some((r) => r.orderId === orderId)) {
+  // BOTH the refund and the service.
+  //
+  // Read from the ORDER ROW, not by scanning the log, and re-checked inside the
+  // CAS below: a separate read of the log left a race in which a compensation
+  // recorded between this check and the CAS still let the release through
+  // (`putResolution` now also advances `rev`, so the CAS loses as `raced`).
+  // (Review findings H1 round 5, C1/L7 round 6.)
+  if (order.compensated) {
     return { released: false, refusal: "compensated", order };
   }
 
