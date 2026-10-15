@@ -1,21 +1,20 @@
 # gate-recovery CLI smoke
-# HEAD: 40c6563d2eae0b33f92bd1bfaac7841e82422334
-# working tree: DIRTY
-#    M evidence/recovery/cli_smoke_round2.txt
+# HEAD: b7547a5d64b896423b120204a58f7e5c61f5d33a
+# working tree: clean (excluding this transcript)
 # source blobs:
 #   55e5276fecccc8bedb62bd8f9431a25136d1ecd9  src/gate-recovery.ts
 #   46edd457d6053617c97fbb9f117b9d5e08a8187f  src/gate-recovery-cli.ts
 #   d66bf2020b848844af75f4df5500e199da99432a  src/gate-store.ts
 #   7e44f7a9008b5cd93cafcd050d374f83ccdbb61c  src/gate-recovery.test.ts
 
-$ bun src/gate-recovery-cli.ts list --db /home/c08r4d0r/.cache/hermes/tmp/tmp.TRObWN3q4L/gate.sqlite
+$ bun src/gate-recovery-cli.ts list --db /home/c08r4d0r/.cache/hermes/tmp/tmp.Osw4zmAhyW/gate.sqlite
 reserved res1 age=0.0min lease live sats=1200 tool=tool:place_order
-legacy-paid legacy1 age=29867890.2min LEASE EXPIRED sats=1000 tool=tool:place_order
+legacy-paid legacy1 age=29867890.5min LEASE EXPIRED sats=1000 tool=tool:place_order
 1 legacy 'paid' row(s): the gate set 'paid' BEFORE running the action, so the outcome is unverifiable and the row can never be re-driven or released. Compensate (refund/abandon) and close the incident with that record.
 1 reservation(s) still live. Do NOT release a live one: a slow action and a crashed one look the same here. Check the downstream venue first.
 rc=0
 
-$ bun src/gate-recovery-cli.ts release --db /home/c08r4d0r/.cache/hermes/tmp/tmp.TRObWN3q4L/gate.sqlite --order res1
+$ bun src/gate-recovery-cli.ts release --db /home/c08r4d0r/.cache/hermes/tmp/tmp.Osw4zmAhyW/gate.sqlite --order res1
 refused: res1 is only 0.0min into a 15.0min lease; it may still be running. Re-run with --force only after checking the venue never received the action.
 rc=1
 
@@ -23,15 +22,15 @@ $ bun src/gate-recovery-cli.ts release --db "$DB" --order res1 --lease-min 0.001
 usage error: --lease-min may not be lower than the 15-minute default; use --force if you have checked the venue (the two are the same act, and --force is the honest one)
 rc=2 (the guard may only be RAISED; use --force for the explicit override)
 
-$ bun src/gate-recovery-cli.ts compensate --db /home/c08r4d0r/.cache/hermes/tmp/tmp.TRObWN3q4L/gate.sqlite --order res1 --outcome refunded --note venue confirms delivered
+$ bun src/gate-recovery-cli.ts compensate --db /home/c08r4d0r/.cache/hermes/tmp/tmp.Osw4zmAhyW/gate.sqlite --order res1 --outcome refunded --note venue confirms delivered
 recorded refunded for res1. The order stays settlement_reserved on purpose: it still refuses to re-run.
 rc=0
 
-$ bun src/gate-recovery-cli.ts compensate --db /home/c08r4d0r/.cache/hermes/tmp/tmp.TRObWN3q4L/gate.sqlite --order legacy1 --outcome refunded --note pre-2026-10-09, unverifiable
+$ bun src/gate-recovery-cli.ts compensate --db /home/c08r4d0r/.cache/hermes/tmp/tmp.Osw4zmAhyW/gate.sqlite --order legacy1 --outcome refunded --note pre-2026-10-09, unverifiable
 recorded refunded for legacy1. The order stays paid on purpose: it still refuses to re-run.
 rc=0
 
-$ bun src/gate-recovery-cli.ts compensate --db /home/c08r4d0r/.cache/hermes/tmp/tmp.TRObWN3q4L/gate.sqlite --order set1 --outcome refunded --note x
+$ bun src/gate-recovery-cli.ts compensate --db /home/c08r4d0r/.cache/hermes/tmp/tmp.Osw4zmAhyW/gate.sqlite --order set1 --outcome refunded --note x
 refused: set1 is settled, which is not compensatable (only settlement_failed, settlement_reserved and legacy paid are)
 rc=1
 
@@ -39,9 +38,9 @@ $ bun src/gate-recovery-cli.ts nonsense --db "$DB"
 usage error: unknown command nonsense
 rc=2
 
-$ bun src/gate-recovery-cli.ts list --db /home/c08r4d0r/.cache/hermes/tmp/tmp.TRObWN3q4L/gate.sqlite
+$ bun src/gate-recovery-cli.ts list --db /home/c08r4d0r/.cache/hermes/tmp/tmp.Osw4zmAhyW/gate.sqlite
 reserved res1 age=0.0min lease live sats=1200 tool=tool:place_order compensated=refunded
-legacy-paid legacy1 age=29867890.2min LEASE EXPIRED sats=1000 tool=tool:place_order compensated=refunded
+legacy-paid legacy1 age=29867890.5min LEASE EXPIRED sats=1000 tool=tool:place_order compensated=refunded
 1 legacy 'paid' row(s): the gate set 'paid' BEFORE running the action, so the outcome is unverifiable and the row can never be re-driven or released. Compensate (refund/abandon) and close the incident with that record.
 1 reservation(s) still live. Do NOT release a live one: a slow action and a crashed one look the same here. Check the downstream venue first.
 rc=0
