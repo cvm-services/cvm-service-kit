@@ -1,3 +1,157 @@
+# REPORT — t_7233c336 (PR #13 money gate: consumer audit + recovery path + test hardening)
+
+Repo: `cvm-services/cvm-service-kit` · Worktree: `~/worktrees/pr13-consumer-audit`
+Branch: `fix/gate-consumer-audit` · PR: **#17** (OPEN, MERGEABLE/CLEAN)
+Head at the time of writing: `33071d1` (pushed, read back via `git ls-remote`)
+Author family: glm/zai · Reviewer family: deepseek (via the `kimi-k2.7-code` lane)
+
+## 1. Arrival state (what was already true when this pass started)
+
+The dispatch prose was stale in three ways, and the work is not what it describes:
+
+1. **PR #13 is MERGED**, not blocked-and-open. Its blocked verdict is a historical record; there
+   is no open PR #13 to update or re-review.
+2. **The blocker work already existed** on `fix/gate-consumer-audit`, published as **PR #17**.
+   A previous pass had produced the audit doc, the recovery module, the CLI and the runbook.
+3. **The card `t_7233c336` is not on any board** on this host (`hermes kanban show` → "no such
+   task"); the durable record is the branch + PR.
+
+So this pass did not redo the work. It **obtained the cross-family review that the earlier pass
+had reported as unobtainable**, then worked every finding it produced — four rounds of them.
+
+## 2. The cross-family review (the outstanding gate)
+
+The earlier pass concluded "cross-family review is unobtainable here". That was wrong, and the
+correction is worth keeping:
+
+- the refusals were a **capacity burst**: `503` with `capacity_exhausted: true` and a **non-empty**
+  `candidates_considered` (not exhaustion, not a missing lane — pitfall 11/18);
+- **`kimi-k2.7-code` served `deepseek-flash`**, a genuine cross-family lane for the glm/zai author;
+- **the same ~31 KB prompt returns 0 content chars at `--max-tokens 20000` and a full verdict at
+  `60000`** (reasoning budget, pitfall 25's ascending ladder) — and a **43 KB prompt is refused
+  where 34 KB is admitted**, so the harness must be trimmed, not abandoned.
+
+Five review artifacts were produced (all under `~/reports/reviews/`, all carrying
+`reviewer_model:`): rounds A2, B, C, D on the earlier heads, and F on the current head.
+
+| round | verdict | what it found |
+| --- | --- | --- |
+| A2 | REQUEST_CHANGES | the audit's *evidence* was thin (narrow status grep, no cast/structural search) |
+| B | REQUEST_CHANGES | 10 findings on the recovery path — real defects, not evidence gaps |
+| C | REQUEST_CHANGES | **re-opened the ABA race and was right** |
+| D | REQUEST_CHANGES | 5 more, including one **created by my own round-3 fix** |
+| F | (see §6) | re-review of the round-5 fixes |
+
+## 3. What changed in the code
+
+### 3.1 The release race — the finding that justified the loop
+
+- Round 3's argument was that the ABA "cannot happen without `--force`, because each CLI run
+  re-reads the row". That covers only the case where the second read is *after* the re-claim.
+- Round 4 described the case it misses, and was right: `releaseReservation` read the row, then
+  CASed on **status only**. A read taken before (another operator's release + a caller's
+  re-claim) still matched — `settlement_reserved` again — and **cancelled the live claim**,
+  letting a second caller run the action concurrently. The read and the CAS are not atomic and a
+  status is not a version.
+- Round 5 then showed the first fix was still wrong: `updated_at` is wall-clock **milliseconds**,
+  so release + re-claim inside one tick collide.
+
+**Final fix:** `gate_orders.rev` — a **monotonic revision** (`INTEGER NOT NULL DEFAULT 0`, with an
+`ALTER TABLE` migration) incremented by `claim`, `put` and `releaseIfUnchanged` on *every*
+transition — and a release CAS predicated on `status AND rev`. A version can no longer repeat.
+Test: the reviewer's own falsifier, an interleaving test that performs the interfering
+release + re-claim from **inside** `get()`, driven through `releaseReservation`; it additionally
+asserts the row advances exactly two revisions. Mutation `M-R4a` (reinstate the status-only CAS)
+and `M-R5c` (stop advancing `rev`) are both **CAUGHT**.
+
+### 3.2 The hole my own fix created (round 5)
+
+Making a `settlement_reserved` order compensatable (round 3) was right — the runbook told
+operators to do it. But `releaseReservation` never checked for a recorded compensation, so after
+a refund a later `release` could still re-drive the action and the customer would hold **both the
+refund and the service**. A compensated order is now **CLOSED**: `release` refuses it, with or
+without `--force`. Mutation `M-R5a` **CAUGHT**.
+
+### 3.3 The rest
+
+| finding | fix |
+| --- | --- |
+| a compensation could be recorded for an order that settled in between | `putResolution` is a conditional `INSERT ... WHERE EXISTS (order_id, status, rev)`; `refusal: "raced"` otherwise |
+| legacy `paid` rows had no operator surface at all | third `legacy` bucket in `findStuckOrders`, `legacy-paid` in `list`, compensatable, runbook §4 |
+| the runbook told operators to compensate a reservation the API **refused** | a reservation is compensatable; step 2.2 rewritten |
+| `--lease-min` could shrink the guard past `--force` | it may only **raise** the lease |
+| the lease guard failed **open** on a non-finite `updatedAt` | fails closed |
+| …and on a **zero/epoch** `updatedAt` | `usableAge()` requires finite **and positive** |
+| the compensation log was an upsert (erased the record it corrected) | append-only (`seq INTEGER PRIMARY KEY AUTOINCREMENT`) + in-place rebuild migration |
+| the "current" record was chosen by `at` | ordered by insertion (`seq`), so clock skew cannot resurrect an older entry |
+| a flag a command does not honour was silently ignored | `COMMAND_FLAGS`: usage error |
+| `compensate` printed "stays settlement_failed" for any row | names the actual status |
+
+The audit doc (`docs/gate-consumer-audit.md`) carries the full per-finding adjudication, round by
+round, including the findings I disputed and why — plus the two items that are **accepted
+residuals** rather than fixes: `--force` can release a merely-slow live caller (it is the
+tool's documented break-glass, and the venue check is the only control that can distinguish slow
+from crashed), and the **cutover window** (§ F5b) for a service moving from the in-memory gate.
+
+## 4. Evidence (measured, at head `33071d1`)
+
+- `bun run typecheck` (`tsc --noEmit`) → **rc=0**
+- `bun test src services` → **338 pass / 1 skip / 0 fail** (339 tests, 43 files)
+- `bun test src/gate-recovery.test.ts` → **16 pass / 0 fail** (6 at arrival)
+- `deno task test` → **29 passed / 0 failed**; `deno check` on the four changed files → rc=0
+- `evidence/recovery/mutate_gate_recovery.py` (runnable; exits non-zero on an unexplained
+  survivor **or a drifted anchor**, so it cannot pass vacuously): 12 mutants — **10 CAUGHT**,
+  M-B6 provably *equivalent* (both forms return the same value for every input), **0 unexplained
+  survivors**. Source restored byte-identical (asserted).
+- `evidence/recovery/cli_smoke.sh` → measured exit codes 0/1/2.
+- Both transcripts print the **source blob hashes** and the tree state, so the evidence is bound
+  to the mutated *content* rather than to a commit a later docs-only commit moves.
+
+## 5. Honest limits (not verified, stated not hidden)
+
+- **`GATE_DB:` in `deploy/ansible/playbook-wrappers.yml` is an IaC change and is UNEXECUTED on a
+  live node from this host** (no managed target, no fleet credentials). The fleet agreement
+  requires a post-condition read back **from the node**; that read-back does not exist. The
+  mitigating argument — the same `/var/lib/loom/<svc>/gate.sqlite` path is already declared for
+  `cvm-nanogpt`/`cvm-ppq`/`cvm-2fiat`, the role creates the directory (owner = service user), and
+  `cvm-sms4sats` already writes `orders.sqlite` + `cashu.sqlite` there — **is an argument, not
+  evidence.**
+- **The consumer-audit premise was false and that is itself a finding**: the five named
+  "consumers" are not repositories. They are directories in this repo, compiled by the same
+  `tsc --noEmit`. No consumer owns a `GateOrderStore`; no consumer reads a `GateOrder.status`;
+  the `TypeError after payment` failure mode does not exist. The **durable control is the in-tree
+  typecheck, not a prose checklist** — demonstrated when `main` gained a **sixth** consumer
+  (`cvm-deepinfra`) that the original five-name list did not cover.
+- **ngit push is not possible from this host** (`no accounts available`). GitHub only; stated
+  in the PR rather than claimed.
+- No claim is made that the round-6 verdict is APPROVED. Whatever it says is recorded.
+
+## 6. State at handoff
+
+- Branch `fix/gate-consumer-audit` at **`33071d1`**, pushed to `github` and **read back via
+  `git ls-remote`**. CI on that head: **bun SUCCESS, deno SUCCESS**; `mergeable: MERGEABLE`,
+  `mergeStateStatus: CLEAN`.
+- PR #17 updated with the full findings/evidence write-up
+  (https://github.com/cvm-services/cvm-service-kit/pull/17#issuecomment-6194454622).
+- **PR #17 is NOT merged.** It is a fleet-owned repo (default branch = `main`), so the
+  consolidation rule says merge — but a merge requires a cross-family verdict on the *merged
+  head*, and no round has returned APPROVE. Merging on a stack of REQUEST_CHANGES verdicts whose
+  findings are fixed-but-unre-reviewed would be exactly the "review published" theatre the
+  working agreement exists to prevent. The remaining step is a verdict on `33071d1` (round F);
+  then merge.
+- Remaining work, in order:
+  1. Read `~/reports/reviews/cvm-service-kit-pr17-F-final.md` when the round-F run completes
+     (started against `33071d1`; admitted by the lane on the first attempt, generation
+     in progress at the time of writing). If it is `APPROVE`, merge PR #17 and update the audit
+     doc with the verdict. If `REQUEST_CHANGES`, work the findings first.
+  2. Merge PR #17 into `main` (or, if a fork-style flow is wanted, keep exactly one open PR).
+  3. The `GATE_DB` IaC line needs a real converge + read-back on a managed node by someone with
+     fleet credentials — out of scope for an unprivileged worker on this host.
+
+---
+
+# (previous pass — preserved verbatim)
+
 # REPORT - gate money-safety fix (fix/gate-money-safety)
 
 ## t_7233c336 — offload verification pass 2 (2026-10-14, offload worker)
