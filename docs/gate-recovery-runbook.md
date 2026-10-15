@@ -20,8 +20,14 @@ Nothing here is allowed to be automatic. **Whether a `settlement_reserved` actio
 actually reached the venue is knowable only by looking at the venue.** A crashed
 action and a merely slow one are indistinguishable from the store, so an automatic
 release would re-run an action whose result is unknown — the exact double spend this
-gate exists to prevent. The lease (`--lease-min`, default 15) only decides what gets
-*flagged* to you; it never moves a row.
+gate exists to prevent.
+
+The lease (`--lease-min`, default 15 min) never moves a row by itself. It does two
+things and only two: it decides what `list` **flags** to you, and it decides whether
+`release` **refuses** without `--force`. `--lease-min` may only be *raised* — lowering
+it is the same act as `--force` (it shrinks the guard past a live reservation without
+an explicit, auditable flag), so the command refuses to lower it. If you need to
+release something the lease still protects, say `--force` and say why.
 
 ## 1. Find stuck orders
 
@@ -39,8 +45,9 @@ done
 `list` is read-only. Output is one line per stuck order:
 
 ```
-reserved <orderId> age=3.4min LEASE EXPIRED sats=1200 tool=tool:send_sms
-failed   <orderId> age=41.0min lease live     sats=5022 tool=tool:place_order compensated=refunded
+reserved    <orderId> age=3.4min LEASE EXPIRED sats=1200 tool=tool:send_sms
+failed      <orderId> age=41.0min lease live     sats=5022 tool=tool:place_order compensated=refunded
+legacy-paid <orderId> age=6.2d   lease live     sats=1000 tool=tool:place_order
 ```
 
 A `lease live` reservation may still be a running action — do not touch it. Re-run
@@ -51,12 +58,21 @@ A `lease live` reservation may still be a running action — do not touch it. Re
 1. **Look at the venue first.** Ask the downstream system whether it ever received
    this order. The gate's `orderId` is the idempotency key the service passes
    downstream, so a hit means the action ran.
-2. **The action ran** → do *not* release. Compensate (step 3) after refunding, and if
-   the order is still `settlement_reserved` because the process died before the
-   terminal write, first let it be — the row is the evidence of what happened. The
-   status will only move when the row is released and a retry re-runs the action, which
-   you must not do. Record the compensation against the order, then close the incident
-   with that evidence in the ticket.
+2. **The action ran** → do *not* release. The sats are spent for a service the
+   customer received; record a compensation against the order:
+
+```sh
+bun src/gate-recovery-cli.ts compensate --db /var/lib/loom/cvm-ppq/gate.sqlite \
+  --order <orderId> --outcome refunded --note "venue confirms order X was delivered"
+```
+
+   `compensate` accepts a `settlement_reserved` order for exactly this case (if it
+   did not, the runbook would be describing an action the tool refuses). The row
+   **stays** `settlement_reserved`: that status is what keeps every retry throwing
+   `SettlementInProgressError` instead of re-running an action of unknown outcome.
+   It keeps appearing in `list`, now marked `compensated=<outcome>` — that is the
+   record that a human resolved it. Close the incident with the venue check and
+   this record in the ticket.
 3. **The venue never received it** → release the claim so the caller may retry:
 
 ```sh
@@ -83,12 +99,34 @@ bun src/gate-recovery-cli.ts compensate --db /var/lib/loom/cvm-2fiat/gate.sqlite
 
 `--outcome` is `refunded` or `abandoned`. The record goes to the `gate_recovery` table
 (`order_id`, `outcome`, `note`, `at`) and is durable across restarts; `list` shows it as
-`compensated=refunded`.
+`compensated=refunded`. The table is **append-only**: a second compensation for the same
+order (a correction, or a refund after an earlier abandonment) is added to the history
+rather than overwriting the first, and `list` shows the most recent one. Nothing is lost,
+so an incident can be reconstructed after the fact.
 
 **The order status is deliberately NOT changed.** `settlement_failed` is what keeps a
 replay throwing `SettlementFailedError` instead of re-running the failed action. A
 compensation is bookkeeping about the money; it is not a licence to retry. Do not edit
 `gate_orders` by hand to "clear" a row — the status is the money-safety fact.
+
+## 4. A legacy `paid` order
+
+`paid` is the pre-2026-10-09 status: the gate wrote it **before** running the action, so
+the outcome is unverifiable by construction and the gate refuses the row forever with
+`GateOrderStateError` ("settlement outcome unknown"). It is not a reservation, so there is
+nothing to release; it is not `settlement_failed`, so there is no failure to inspect.
+
+`list` reports these as `legacy-paid`. The only operator action is to decide the money and
+record it:
+
+```sh
+bun src/gate-recovery-cli.ts compensate --db /var/lib/loom/cvm-sms4sats/gate.sqlite \
+  --order <orderId> --outcome refunded --note "pre-2026-10-09 row; outcome unverifiable, refunded on request"
+```
+
+The row stays `paid`. Do not hand-edit it to `settled` or `settlement_failed`: both would
+assert an outcome nobody recorded, and `settled` would additionally let a replay return a
+cached result for work that may never have run.
 
 ## Upgrading a service to the durable gate (the cutover window)
 
@@ -115,6 +153,11 @@ Full reasoning: `docs/gate-consumer-audit.md` § F5b.
 
 - Never auto-release, never add a timeout sweep that flips rows on its own. Any such
   change re-introduces the double spend for the crashed-but-actually-ran case.
+- `--force` can release a **live, merely slow** caller: the original caller is not
+  cancelled and will still finish, so a retry started afterwards can run the action a
+  second time against the same payment. `--force` is break-glass for "the venue tells
+  me it never received this" — never a retry button, and never for an order whose
+  venue check you have not actually done.
 - Never write `gate_orders.status` by hand. Use `release` (which goes through the CAS)
   or `compensate` (which does not touch the status at all).
 - Never point the command at a database a service is not holding — the gate is the only
@@ -122,3 +165,11 @@ Full reasoning: `docs/gate-consumer-audit.md` § F5b.
 - Every release and compensation is an operator action; put the `orderId`, the venue
   check and the outcome in the incident notes. The tool prints what it did; keep the
   output.
+
+## Scope of the recovery path
+
+`list` / `release` / `compensate` are implemented against the concrete `SqliteGateStore`
+(`list` is deliberately NOT on the `GateOrderStore` interface, so the shared interface is
+not widened again for an operator concern). All six gate consumers in this repo construct a
+`SqliteGateStore`, so every deployed service is covered; a future service that ships a
+*different* durable store would need its own recovery implementation.

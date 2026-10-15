@@ -26,14 +26,24 @@ export interface CliIo {
 const USAGE = `gate-recovery - operator escape hatch for orders the gate will not retry
 
   list       --db <gate.sqlite> [--lease-min N]
-  release    --db <gate.sqlite> --order <id> [--lease-min N] [--force]
+  release    --db <gate.sqlite> --order <id> [--force]
   compensate --db <gate.sqlite> --order <id> --outcome refunded|abandoned --note <why>
 
-  release   moves a crashed 'settlement_reserved' order back to awaiting_payment
-            so a retry can re-drive it. It refuses while the lease is live
-            unless --force is given: check the downstream venue FIRST.
-  compensate records an operator compensation for a 'settlement_failed' order.
-            It never changes the status, so the order still refuses to re-run.`;
+  list       reports reservations that never wrote an outcome, terminal failures,
+             and legacy 'paid' rows whose outcome is unverifiable.
+  release    moves a crashed 'settlement_reserved' order back to awaiting_payment
+             so a retry can re-drive it. It refuses while the lease is live
+             unless --force is given: check the downstream venue FIRST. --force
+             can release a merely SLOW caller, so it is break-glass, not a retry
+             button.
+  compensate records an operator compensation for a 'settlement_failed',
+             'settlement_reserved' or legacy 'paid' order. It never changes the
+             status, so the order still refuses to re-run.
+
+  --lease-min raises the age a reservation must reach before 'list' flags it and
+  before 'release' proceeds without --force. It may not be LOWERED below the
+  ${DEFAULT_RESERVATION_LEASE_MS / 60_000}-minute default: shrinking the guard is the same act as --force, so use
+  --force and say so.`;
 
 interface Flags {
   values: Map<string, string>;
@@ -67,6 +77,16 @@ function leaseMsOf(flags: Flags): number | string {
   if (raw === undefined) return DEFAULT_RESERVATION_LEASE_MS;
   const minutes = Number(raw);
   if (!Number.isFinite(minutes) || minutes <= 0) return `--lease-min must be a positive number`;
+  // --lease-min may only RAISE the guard. If it could lower it, an operator (or a
+  // script) could shrink the lease past a live reservation and release it without
+  // ever typing --force - the guard would be callable away, and the audit trail
+  // would not show why. (Review finding B4.)
+  if (minutes < DEFAULT_RESERVATION_LEASE_MS / 60_000) {
+    return (
+      `--lease-min may not be lower than the ${DEFAULT_RESERVATION_LEASE_MS / 60_000}-minute default; ` +
+      `use --force if you have checked the venue (the two are the same act, and --force is the honest one)`
+    );
+  }
   return minutes * 60_000;
 }
 
@@ -128,12 +148,22 @@ function listCommand(store: SqliteGateStore, leaseMs: number, io: CliIo): number
       );
     }
   };
-  if (report.reserved.length === 0 && report.failed.length === 0) {
+  if (report.reserved.length === 0 && report.failed.length === 0 && report.legacy.length === 0) {
     io.log("no stuck orders");
     return 0;
   }
   describe("reserved", report.reserved);
   describe("failed", report.failed);
+  // Legacy `paid` rows: the gate refuses them forever (the outcome was never
+  // recorded), so the only operator action is a compensation record.
+  describe("legacy-paid", report.legacy);
+  if (report.legacy.length > 0) {
+    io.log(
+      `${report.legacy.length} legacy 'paid' row(s): the gate set 'paid' BEFORE running the action,` +
+        ` so the outcome is unverifiable and the row can never be re-driven or released. Compensate` +
+        ` (refund/abandon) and close the incident with that record.`,
+    );
+  }
   if (report.reserved.length > 0) {
     io.log(
       `${report.reserved.length} reservation(s) still live. Do NOT release a live one: a slow` +
@@ -201,8 +231,9 @@ function compensateCommand(store: SqliteGateStore, flags: Flags, io: CliIo): num
     note,
   });
   if (result.recorded) {
+    const status = store.get(orderId)?.status ?? "unchanged";
     io.log(
-      `recorded ${outcome} for ${orderId}. The order stays settlement_failed on purpose:` +
+      `recorded ${outcome} for ${orderId}. The order stays ${status} on purpose:` +
         ` it still refuses to re-run.`,
     );
     return 0;
@@ -210,7 +241,11 @@ function compensateCommand(store: SqliteGateStore, flags: Flags, io: CliIo): num
   if (result.refusal === "not_found") {
     io.error(`refused: no order ${orderId} in this database`);
   } else {
-    io.error(`refused: ${orderId} is not settlement_failed, so there is nothing to compensate`);
+    const status = store.get(orderId)?.status ?? "unknown";
+    io.error(
+      `refused: ${orderId} is ${status}, which is not compensatable` +
+        ` (only settlement_failed, settlement_reserved and legacy paid are)`,
+    );
   }
   return 1;
 }

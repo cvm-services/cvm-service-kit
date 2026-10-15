@@ -1,0 +1,36 @@
+========================================================================
+MUTATION EVIDENCE - gate recovery path (round-2 review findings)
+HEAD: ff4e25a4831d5b3da35da0fcf3abdcc431d13ddc
+working tree: DIRTY:
+M src/gate-recovery-cli.ts
+ M src/gate-recovery.test.ts
+ M src/gate-recovery.ts
+ M src/gate-store.ts
+?? evidence/recovery/mutate_gate_recovery.py
+?? evidence/recovery/mutation_gate_recovery_round2.txt
+Method: mutate in place, `bun test src/gate-recovery.test.ts`, restore byte-identical (asserted).
+========================================================================
+
+BASELINE (unmutated): 10 pass / 0 fail
+
+M-B2  drop the legacy 'paid' bucket from the stuck report
+    9 pass / 1 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B2: a legacy 'paid' row is surfaced AND compensatable (it had no surface at all) [45.47ms]
+M-B3  remove settlement_reserved from COMPENSATABLE_STATUSES
+    9 pass / 1 fail -> CAUGHT
+      (fail) gate recovery: compensating a terminal failure > a compensation is recorded durably and does NOT license a retry [80.48ms]
+M-B4  remove the --lease-min lower bound (shrink the guard instead of --force)
+    9 pass / 1 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B4/B1: a live lease cannot be released without --force, and --lease-min cannot be lowered [77.82ms]
+M-B5  revert putResolution to an upsert (the log loses history)
+    7 pass / 3 fail -> CAUGHT
+      (fail) gate recovery: compensating a terminal failure > a compensation is recorded durably and does NOT license a retry [39.37ms]
+M-B6  classify(): drop the Number.isFinite guard on the lease flag
+    10 pass / 0 fail -> SURVIVED but EQUIVALENT: ageMs is NaN exactly when Number.isFinite(ageMs) is false, and `NaN > x` is false, so both expressions yield false for every input. The guard is intent, not behaviour.
+M-B6b releaseReservation(): drop the fail-closed non-finite age guard
+    9 pass / 1 fail -> CAUGHT
+      (fail) gate recovery: round-2 review findings > B6: an un-computable age FAILS CLOSED instead of reading as long-expired [0.78ms]
+
+POST-RESTORE: 10 pass / 0 fail (source byte-identical)
+
+RESULT: 0 unexplained survivor(s)

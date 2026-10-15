@@ -253,16 +253,154 @@ describe("gate recovery: compensating a terminal failure", () => {
     expect(err).toBeInstanceOf(SettlementFailedError);
     expect(runs).toBe(0);
 
-    // Only a terminally FAILED order can be compensated.
+    // An order that is NOT compensatable (settled / awaiting_payment) is refused,
+    // so a compensation can never brand a live or successful order as resolved.
     const other = new SqliteGateStore(path);
     crashAfterClaim(other, "live1");
-    expect(recordCompensation(other, "live1", { outcome: "abandoned", note: "x" }).refusal).toBe(
-      "not_failed",
+    // A reservation IS compensatable (review finding B3: the runbook tells the
+    // operator to record a compensation for a crashed-after-venue order, and
+    // before this fix the API refused exactly that row).
+    expect(recordCompensation(other, "live1", { outcome: "abandoned", note: "x" }).recorded).toBe(true);
+    const settled = awaiting("set1");
+    settled.status = "settled";
+    other.put(settled);
+    expect(recordCompensation(other, "set1", { outcome: "abandoned", note: "x" }).refusal).toBe(
+      "not_compensatable",
     );
     expect(recordCompensation(other, "ghost", { outcome: "abandoned", note: "x" }).refusal).toBe(
       "not_found",
     );
     other.close();
+    reopened.close();
+  }, 30_000);
+});
+
+describe("gate recovery: round-2 review findings", () => {
+  test("B2: a legacy 'paid' row is surfaced AND compensatable (it had no surface at all)", async () => {
+    const { store } = mkStore();
+    const legacy = awaiting("legacy1");
+    // `paid` is the pre-2026-10-09 status, written BEFORE the action ran.
+    legacy.status = "paid";
+    store.put(legacy);
+
+    const report = findStuckOrders(store, { now: 60 * MINUTE });
+    expect(report.legacy).toHaveLength(1);
+    expect(report.legacy[0]!.order.orderId).toBe("legacy1");
+    expect(report.reserved).toHaveLength(0);
+    expect(report.failed).toHaveLength(0);
+
+    // Release refuses it (it is not a reservation) and it is never re-driven ...
+    expect(releaseReservation(store, "legacy1", { force: true }).refusal).toBe("not_reserved");
+    // ... but the money can be recorded, which is the only possible operator act.
+    expect(recordCompensation(store, "legacy1", { outcome: "refunded", note: "unverifiable" }).recorded)
+      .toBe(true);
+    expect(store.get("legacy1")!.status).toBe("paid");
+
+    // The operator command surfaces the bucket explicitly.
+    const path = join(mkdtempSync(join(tmpdir(), "gate-legacy-")), "gate.sqlite");
+    const s2 = new SqliteGateStore(path);
+    s2.put({ ...legacy, orderId: "legacy2" });
+    const cap = captureIo();
+    expect(await cliMain(["list", "--db", path], cap.io)).toBe(0);
+    expect(cap.lines.join("\n")).toContain("legacy-paid legacy2");
+    expect(cap.lines.join("\n")).toContain("outcome is unverifiable");
+    s2.close();
+    store.close();
+  }, 30_000);
+
+  test("B4/B1: a live lease cannot be released without --force, and --lease-min cannot be lowered", async () => {
+    const { store, path } = mkStore();
+    crashAfterClaim(store, "aba1");
+
+    // (a) The non-force path: the row is live, so the release refuses. This is
+    // what makes the ABA sequence impossible WITHOUT --force: a second operator
+    // re-reads, sees a freshly-claimed row, and is refused by the lease.
+    const first = releaseReservation(store, "aba1", { leaseMs: DEFAULT_RESERVATION_LEASE_MS });
+    expect(first.released).toBe(false);
+    expect(first.refusal).toBe("lease_active");
+
+    // (b) The ABA shape: release, a caller re-claims, then a SECOND release.
+    const forced = releaseReservation(store, "aba1", { leaseMs: DEFAULT_RESERVATION_LEASE_MS, force: true });
+    expect(forced.released).toBe(true);
+    expect(store.claim("aba1", "awaiting_payment", "settlement_reserved")).toBe(true); // caller C
+    const second = releaseReservation(store, "aba1", { leaseMs: DEFAULT_RESERVATION_LEASE_MS });
+    expect(second.released).toBe(false);
+    expect(second.refusal).toBe("lease_active"); // C's claim reset updatedAt
+    expect(store.get("aba1")!.status).toBe("settlement_reserved");
+
+    // (c) --lease-min may only raise the guard, never lower it: shrinking the
+    // lease would be --force without the flag (and without the audit trail).
+    const lowered = captureIo();
+    expect(await cliMain(["release", "--db", path, "--order", "aba1", "--lease-min", "0.001"], lowered.io))
+      .toBe(2);
+    expect(lowered.errors.join("\n")).toContain("may not be lower");
+    const raised = captureIo();
+    expect(await cliMain(["list", "--db", path, "--lease-min", "30"], raised.io)).toBe(0);
+    store.close();
+  }, 30_000);
+
+  test("B6: an un-computable age FAILS CLOSED instead of reading as long-expired", async () => {
+    // The schema declares `updated_at INTEGER NOT NULL`, so SQLite refuses to
+    // write a NULL there — the reachable shapes are a row written by a different
+    // store implementation, a hand-edited file, or a future schema change. Drive
+    // the guard directly with a store that reports a non-finite `updatedAt`; the
+    // point under test is `releaseReservation`'s behaviour, not how the row got
+    // that way.
+    const nanOrder: GateOrder = {
+      ...awaiting("nan1"),
+      status: "settlement_reserved",
+      updatedAt: Number.NaN,
+    };
+    let claims = 0;
+    const stub = {
+      get: () => nanOrder,
+      list: () => [nanOrder],
+      listResolutions: () => [],
+      claim: () => {
+        claims++;
+        return true;
+      },
+    } as unknown as SqliteGateStore;
+
+    const report = findStuckOrders(stub, { now: 999 * MINUTE });
+    expect(report.reserved).toHaveLength(1);
+    expect(Number.isFinite(report.reserved[0]!.ageMs)).toBe(false);
+    expect(report.reserved[0]!.leaseExpired).toBe(false); // never "safe because old"
+
+    // Fail closed: refused as if the lease were live, and the CAS is never
+    // reached. `Number.NaN <= leaseMs` is FALSE, so the unguarded form would
+    // have fallen straight through to `claim()`.
+    const out = releaseReservation(stub, "nan1", { leaseMs: DEFAULT_RESERVATION_LEASE_MS });
+    expect(out.released).toBe(false);
+    expect(out.refusal).toBe("lease_active");
+    expect(claims).toBe(0);
+
+    // --force remains the explicit, deliberate override.
+    expect(releaseReservation(stub, "nan1", { force: true }).released).toBe(true);
+    expect(claims).toBe(1);
+  }, 30_000);
+
+  test("B5: the compensation log is APPEND-ONLY — a correction adds, it does not erase", async () => {
+    const { store, path } = mkStore();
+    const failed = awaiting("hist1");
+    failed.status = "settlement_failed";
+    store.put(failed);
+
+    recordCompensation(store, "hist1", { outcome: "abandoned", note: "first read", now: 10 });
+    recordCompensation(store, "hist1", { outcome: "refunded", note: "corrected: refunded", now: 20 });
+
+    // Both records survive, oldest first ...
+    expect(store.listResolutions().map((r) => `${r.outcome}:${r.note}`)).toEqual([
+      "abandoned:first read",
+      "refunded:corrected: refunded",
+    ]);
+    // ... and it is durable across a process restart.
+    store.close();
+    const reopened = new SqliteGateStore(path);
+    expect(reopened.listResolutions()).toHaveLength(2);
+    // The stuck report shows the LATEST record for the order, not the first.
+    const report = findStuckOrders(reopened, { now: 60 * MINUTE });
+    expect(report.failed[0]!.resolution?.outcome).toBe("refunded");
     reopened.close();
   }, 30_000);
 });

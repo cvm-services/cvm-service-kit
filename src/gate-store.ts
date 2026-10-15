@@ -71,15 +71,37 @@ export class SqliteGateStore implements GateOrderStore {
     if (!columns.some((c) => c.name === "proof_hash")) {
       this.db.run(`ALTER TABLE gate_orders ADD COLUMN proof_hash TEXT`);
     }
-    // Recovery records are a NEW table, so `IF NOT EXISTS` is a real create here -
-    // no ALTER migration is needed for it.
+    // Recovery records are an APPEND-ONLY log: every compensation is kept, so the
+    // trail can show a refund followed by a correction (review finding B5). The
+    // table was introduced by this same branch with `order_id` as PRIMARY KEY and
+    // an upsert on write; that shape silently overwrote history, so it is
+    // migrated in place below.
     this.db.run(`
       CREATE TABLE IF NOT EXISTS gate_recovery (
-        order_id TEXT PRIMARY KEY,
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT NOT NULL,
         outcome TEXT NOT NULL,
         note TEXT NOT NULL,
         at INTEGER NOT NULL
       )`);
+    // `PRAGMA table_info` on a real SQLite file: migrate a pre-append-only table
+    // (an earlier build of this branch) by rebuilding it and carrying the rows.
+    const cols = this.db.query(`PRAGMA table_info(gate_recovery)`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "seq")) {
+      this.db.run(`ALTER TABLE gate_recovery RENAME TO gate_recovery_legacy`);
+      this.db.run(`
+        CREATE TABLE gate_recovery (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT,
+          order_id TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          note TEXT NOT NULL,
+          at INTEGER NOT NULL
+        )`);
+      this.db.run(`
+        INSERT INTO gate_recovery (order_id, outcome, note, at)
+        SELECT order_id, outcome, note, at FROM gate_recovery_legacy ORDER BY at ASC`);
+      this.db.run(`DROP TABLE gate_recovery_legacy`);
+    }
   }
 
   private static rowToOrder(row: any): GateOrder {
@@ -158,18 +180,24 @@ export class SqliteGateStore implements GateOrderStore {
     return Number(res.changes ?? 0) === 1;
   }
 
-  /** Record an operator compensation for a terminal failure (audit trail). */
+  /**
+   * Append an operator compensation to the audit log. Deliberately an INSERT, not
+   * an upsert: a second compensation (a correction, or a refund following an
+   * abandonment) must ADD to the history rather than erase the first entry.
+   * Readers that want "the current state" take the LAST record per order.
+   */
   putResolution(resolution: GateResolution): void {
     this.db.run(
-      `INSERT INTO gate_recovery (order_id, outcome, note, at) VALUES (?, ?, ?, ?)
-       ON CONFLICT(order_id) DO UPDATE SET
-         outcome=excluded.outcome, note=excluded.note, at=excluded.at`,
+      `INSERT INTO gate_recovery (order_id, outcome, note, at) VALUES (?, ?, ?, ?)`,
       [resolution.orderId, resolution.outcome, resolution.note, resolution.at],
     );
   }
 
+  /** The full compensation history, oldest first. Append-only: nothing is lost. */
   listResolutions(): GateResolution[] {
-    const rows = this.db.query(`SELECT * FROM gate_recovery ORDER BY at ASC`).all() as any[];
+    const rows = this.db
+      .query(`SELECT * FROM gate_recovery ORDER BY at ASC, seq ASC`)
+      .all() as any[];
     return rows.map((r) => ({
       orderId: r.order_id,
       outcome: r.outcome,

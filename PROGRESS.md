@@ -331,3 +331,40 @@ than redid, and closed the two things that were actually stale.
   flat router substitutes a SAME-FAMILY lane for an exhausted one. A "cross-family" review
   taken at face value from those ids would have been deepseek reviewing deepseek. Not
   accepted. Requested on the PR instead.
+
+## t_7233c336 — offload pass 3: cross-family re-review obtained, 10 findings fixed (2026-10-15)
+
+**Arrival state.** PR #13 MERGED; the card's work already pushed as PR #17 (head 6395631,
+CI bun+deno pass, MERGEABLE/CLEAN). The outstanding item was the cross-family re-review.
+This pass OBTAINED it (the earlier "unobtainable" was a locked-window + capacity burst) and
+worked its findings.
+
+- the lane: `kimi-k2.7-code` (the only non-503 lane) served **`deepseek-flash`** — a genuine
+  cross-family lane for the glm/zai author, exactly the pitfall-26 salvage. Every other lane
+  503'd (`capacity_exhausted: true`, non-empty `candidates_considered` — a burst, not a config
+  gap). Retried through it after the burst cleared.
+- cap lesson (re-measured): the same 31 KB prompt returns **0 chars at `--max-tokens 20000`**
+  and a full verdict at **60000**. The ascending ladder 20k -> 60k is the fix, not lane death.
+- review A (audit claims) -> `VERDICT: REQUEST_CHANGES`, artifact
+  ~/reports/reviews/cvm-service-kit-pr17-A2-audit.md; review B (recovery path) ->
+  `REQUEST_CHANGES`, 10 findings, ~/reports/reviews/cvm-service-kit-pr17-B-recovery.md.
+- A's findings were "the supplied material lacked the evidence" -> each closed WITH the
+  evidence and written into the audit doc: F4b (widened status search + the
+  operator-independent literal search), F5b (the cutover window A1 raised), plus the six
+  construction sites verbatim, the `as GateOrderStore`/`as any` search, the cvm_service state
+  dir task, and the `grep -i paid` search the reviewer asked for.
+- B's findings were REAL defects in the new code. Fixed (TDD, each with a mutation):
+  legacy `paid` rows surfaced + compensatable (was invisible); a crashed-after-venue
+  reservation is compensatable (the runbook told the operator to do what the API refused);
+  `--lease-min` may only RAISE the lease; the compensation log is append-only; the lease
+  guard fails closed on a non-finite age. The ABA/`--force` finding is adjudicated: the
+  non-force path is provably safe (tested), `--force` is a documented break-glass and is now
+  stated as such in the CLI, the runbook and a test.
+- green: `bun run typecheck` rc=0; `bun test src services` **332 pass / 1 skip / 0 fail**
+  (333 tests, 43 files); `bun test src/gate-recovery.test.ts` 10/10; `deno check` on the 4
+  changed files rc=0; `deno task check` rc=0.
+- mutation: `evidence/recovery/mutate_gate_recovery.py` (runnable, exits non-zero on a
+  survivor) -> baseline 10/0; M-B2/M-B3/M-B4/M-B5/M-B6b CAUGHT; M-B6 provably equivalent
+  (recorded, not counted); 0 unexplained survivors.
+- also fixed a real message bug the CLI smoke exposed: `compensate` printed "stays
+  settlement_failed" for a reservation or a legacy row; it now names the actual status.

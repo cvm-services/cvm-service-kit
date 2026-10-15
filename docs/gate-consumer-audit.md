@@ -575,6 +575,128 @@ no Deployment manifest anywhere in the tree. F6's conclusion holds.
 | `cvm-jlc-quote` does not touch the gate; `contextvm-services` vendors no `payment.ts` | from the audit: `cvm-jlc-quote` runs `PAYMENT_MODE: "none"` and appears in no `new ExplicitGate(` site; `contextvm-services` vendors only `announce/mod/validate/vocab` |
 | `@` instancing / workers / compose / k8s in `deploy/` | closed by A2-LOW above: none |
 
+## Round-3 cross-family review (2026-10-15) — the recovery path, 10 findings, and what changed
+
+Second review this round, this time of the recovery module and the MED test/robustness items
+(same lane: requested `kimi-k2.7-code`, served **`deepseek-flash`** — cross-family to the
+glm/zai author). Artifact: `~/reports/reviews/cvm-service-kit-pr17-B-recovery.md`
+(`VERDICT: REQUEST_CHANGES`, 10 findings, full `COULD_NOT_VERIFY` block).
+
+This review was **substantive**: unlike round 2 it found real defects in the new code, not
+merely thin evidence. Six produced code or doc changes; the rest are adjudicated below with
+reasons. The one factual error is corrected rather than repeated.
+
+### B1 (BLOCKER) — "releaseReservation is ABA-vulnerable and can manufacture two owners"
+
+**Partly right, and the load-bearing part is now pinned by a test; the rest is the tool's
+documented break-glass.** The reviewer's sequence needs `--force`:
+
+- Without `--force`: an operator (or a second operator) who re-runs `release` re-READS the
+  row (there is no cached read — each CLI invocation is a fresh `store.get`). A caller that
+  re-claimed the row has just set `updated_at = Date.now()`, so the fresh read yields
+  `ageMs ≈ 0 <= leaseMs` and the release is **refused** with `lease_active`. The ABA cannot
+  happen on the non-force path. New test: `B4/B1` (a) and (b) — release, a caller re-claims,
+  a second release is refused and the status stays `settlement_reserved`.
+- With `--force`: yes — `--force` releases regardless of age, so a live, merely slow caller
+  can be released and a retry can start a second execution. That is exactly what `--force`
+  *is*: the operator asserts "the venue never received this", which is the only fact that
+  can distinguish a crashed action from a slow one. A version/`updated_at` token in the CAS
+  would not close it (the operator's read is fresh, so the token would match); the honest
+  control is the venue check, which is procedural. **Disposition: accepted as a documented
+  residual, hardened.** The CLI usage, the runbook hard rules and a new test sentence state
+  plainly that `--force` can release a live caller.
+
+The reviewer also named `--lease-min 0` as a way to release without `--force`. That specific
+value was already refused (`minutes <= 0` → usage error); the real hole was **any small
+positive** value (e.g. `0.001`), which shrinks the guard past a live reservation without the
+explicit flag. Fixed: `--lease-min` may now only **raise** the lease (see B4).
+
+### B2 (HIGH) — legacy `paid` rows had no operator surface at all
+
+**Accepted, fixed.** `findStuckOrders` queried only `settlement_reserved` and
+`settlement_failed`; the gate refuses a `paid` row forever with `GateOrderStateError`, so
+those rows were terminal-in-practice and invisible. They now have a third bucket
+(`legacy`), are compensatable, appear in `list` as `legacy-paid`, and the runbook has a
+section for them (§4). This is squarely the original blocker's concern about
+`status === "paid"` being unhandled downstream. Tests: `B2`; mutation M-B2 → CAUGHT.
+
+### B3 (HIGH) — the runbook told the operator to do something the tool refused
+
+**Accepted — a genuine doc/code contradiction, and the reviewer found it by reading both.**
+Runbook step 2.2 said "record the compensation against the order" for a
+crashed-after-venue reservation, while `recordCompensation` accepted only
+`settlement_failed`. Fixed in the code (a reservation is compensatable: the compensation is
+the *only* durable record available for such a row) and step 2.2 now says the same thing,
+including that the status deliberately does not move. Tests: the amended compensation test;
+mutation M-B3 → CAUGHT.
+
+### B4 (HIGH) — `--force` / caller-controlled `--lease-min` can release a live caller
+
+**Accepted, fixed.** `--lease-min` may only be raised; lowering it is the same act as
+`--force` (and was previously silent about it). Refused with a message that names the
+alternative. Test: `B4/B1` (c); mutation M-B4 → CAUGHT. The `--force` half is B1 above.
+
+### B5 (MED) — compensations were overwritten, not append-only
+
+**Accepted, fixed.** `putResolution` was an upsert on `order_id`, so a correction erased the
+record it corrected — for a table the docs called "durable audit record". The table is now
+append-only (`seq INTEGER PRIMARY KEY AUTOINCREMENT`), with an in-place rebuild migration
+for the earlier shape, `listResolutions()` returns the full history oldest-first, and the
+stuck report shows the most recent record per order. Test: `B5`; mutation M-B5 → CAUGHT.
+
+### B6 (MED) — the lease guard fails open on a non-finite `updatedAt`
+
+**Accepted, fixed.** `Math.max(0, now - updatedAt)` is `NaN` for a non-finite `updatedAt`,
+and `NaN <= leaseMs` is `false`, so the refusal did not fire and the release proceeded
+unguarded. Both sites now fail closed (`releaseReservation` refuses; `leaseExpired` is
+false). Note the reachable surface is narrow — the schema declares
+`updated_at INTEGER NOT NULL`, so a NULL write is rejected by SQLite — which is why the test
+drives the guard through a store stub reporting `updatedAt: NaN` rather than a NULL row.
+Test: `B6`; mutation M-B6b → CAUGHT.
+*Mutation M-B6 (the `classify` flag) SURVIVES and is a provably EQUIVALENT mutant* —
+`ageMs` is non-finite exactly when `Number.isFinite(ageMs)` is false, and `NaN > x` is false,
+so both forms return `false` for every input. It is kept as intent, not behaviour, and is
+recorded as equivalent rather than counted as coverage.
+
+### B7 (MED) — do the tests have teeth?
+
+**Answered with mutation evidence, as a runnable harness rather than a transcript.**
+`evidence/recovery/mutate_gate_recovery.py` mutates each fix in place, runs the recovery
+suite, restores byte-identical (asserted), and is written so that an unexplained SURVIVOR
+exits non-zero. Result at this head (transcript:
+`evidence/recovery/mutation_gate_recovery_round2.txt`): **baseline 10 pass / 0 fail;
+M-B2, M-B3, M-B4, M-B5, M-B6b all CAUGHT; M-B6 provably equivalent; 0 unexplained
+survivors.** The ABA, legacy-`paid` and reserved-compensation cases the reviewer named as
+untested now each have a test.
+
+### B8 (MED) — mutation evidence named `d450a1c` while the PR head was `6395631`
+
+**Answered — the reviewer's own falsifier.** `git diff d450a1c..6395631 -- src/gate-recovery.ts
+src/gate-recovery-cli.ts src/gate-store.ts src/gate-recovery.test.ts` is **empty**: the commits
+between them are docs-only (`8755370`, `74b5fad`, `6395631`) plus a merge of `main` that did not
+touch any recovery file, so the evidence described the reviewed source exactly and only the
+docs moved. It is regenerated at this head regardless, so the point is moot going forward.
+
+### LOW-9 — the runbook's lease wording contradicted the code
+
+**Accepted, fixed.** "it never moves a row" was true but incomplete: the lease also decides
+whether `release` refuses without `--force`. Reworded to say both things.
+
+### LOW-10 — recovery works only on the concrete `SqliteGateStore`
+
+**By design, now stated.** `list` is deliberately not on the `GateOrderStore` interface (an
+operator concern should not widen the shared money interface a third time). All six consumers
+construct a `SqliteGateStore`, so every deployed service is covered. Stated in the runbook
+under "Scope of the recovery path".
+
+### The prompt's own omission (my defect, not the reviewer's)
+
+Several of B1/B4's `COULD_NOT_VERIFY` items were accurate: **the round-3 prompt did not
+inline `src/gate-recovery-cli.ts` or `src/gate-recovery.test.ts`**, so the reviewer could not
+check the CLI's parsing, the `--lease-min` clamp, or the test bodies. That is a harness
+omission on my side (the round-2 prompt inlined its material), and the CLI source and test
+file are supplied in the next round's material. Recorded here rather than silently fixed.
+
 ## Independent self-check (SAME family — explicitly NOT a D-115 review)
 
 Every non-flash model lane was capacity-exhausted on this host when the pass ran —
