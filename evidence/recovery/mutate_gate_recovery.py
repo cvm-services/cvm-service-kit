@@ -47,6 +47,17 @@ MUTATIONS = [
      None),
     ("M-R4b listResolutions(): order by `at` instead of insertion order", "src/gate-store.ts",
      'ORDER BY seq ASC`', 'ORDER BY at ASC, seq ASC`', None),
+    ("M-R5a releaseReservation(): drop the compensated-order refusal (H1)",
+     "src/gate-recovery.ts",
+     'if (store.listResolutions().some((r) => r.orderId === orderId)) {',
+     'if (false) {', None),
+    ("M-R5b putResolution(): unconditional insert (no CAS on the order row) (H2)",
+     "src/gate-store.ts",
+     'WHERE EXISTS (SELECT 1 FROM gate_orders\n                     WHERE order_id = ? AND status = ? AND rev = ?)',
+     '', None),
+    ("M-R5c claim(): stop advancing the monotonic rev (M1 - the version must move)",
+     "src/gate-store.ts",
+     "SET status = ?, updated_at = ?, rev = rev + 1,", "SET status = ?, updated_at = ?,", None),
 ]
 
 

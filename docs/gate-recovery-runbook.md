@@ -73,6 +73,13 @@ bun src/gate-recovery-cli.ts compensate --db /var/lib/loom/cvm-ppq/gate.sqlite \
    It keeps appearing in `list`, now marked `compensated=<outcome>` — that is the
    record that a human resolved it. Close the incident with the venue check and
    this record in the ticket.
+
+   **A compensated order is then CLOSED and can never be released.** `release`
+   refuses it (`compensated`), with or without `--force`. That is deliberate: the
+   compensation already decided the customer's money (usually a refund), so letting
+   a retry run the action afterwards would leave them holding both the refund and
+   the service. If the decision changes, record a new compensation note — do not
+   release.
 3. **The venue never received it** → release the claim so the caller may retry:
 
 ```sh

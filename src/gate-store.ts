@@ -54,6 +54,7 @@ export class SqliteGateStore implements GateOrderStore {
         result_json TEXT,
         failure_json TEXT,
         proof_hash TEXT,
+        rev INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )`);
@@ -70,6 +71,13 @@ export class SqliteGateStore implements GateOrderStore {
     // can be bound to it) has the same migration trap as `failure_json`.
     if (!columns.some((c) => c.name === "proof_hash")) {
       this.db.run(`ALTER TABLE gate_orders ADD COLUMN proof_hash TEXT`);
+    }
+    // `rev`: the monotonic per-row revision an operator CAS compares against.
+    // `updated_at` is wall-clock milliseconds and two transitions inside one
+    // millisecond collide, so it cannot serve as a version by itself.
+    // (Review finding M1, round 5.)
+    if (!columns.some((c) => c.name === "rev")) {
+      this.db.run(`ALTER TABLE gate_orders ADD COLUMN rev INTEGER NOT NULL DEFAULT 0`);
     }
     // Recovery records are an APPEND-ONLY log: every compensation is kept, so the
     // trail can show a refund followed by a correction (review finding B5). The
@@ -115,6 +123,7 @@ export class SqliteGateStore implements GateOrderStore {
       result: row.result_json ? JSON.parse(row.result_json) : undefined,
       failure: row.failure_json ? JSON.parse(row.failure_json) : undefined,
       proofHash: row.proof_hash ?? undefined,
+      rev: row.rev ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -172,8 +181,11 @@ export class SqliteGateStore implements GateOrderStore {
   ): boolean {
     // COALESCE, not an assignment: a claim that carries no evidence (a status
     // transition on an already-bound row) must not ERASE the recorded binding.
+    // `rev = rev + 1` on every transition, so a CAS on `rev` can never match a row
+    // that moved away and came back inside the same millisecond.
     const res = this.db.run(
-      `UPDATE gate_orders SET status = ?, updated_at = ?, proof_hash = COALESCE(?, proof_hash)
+      `UPDATE gate_orders SET status = ?, updated_at = ?, rev = rev + 1,
+                             proof_hash = COALESCE(?, proof_hash)
        WHERE order_id = ? AND status = ?`,
       [to, Date.now(), proofHash ?? null, orderId, from],
     );
@@ -193,26 +205,44 @@ export class SqliteGateStore implements GateOrderStore {
    * set by every transition, so requiring it makes a stale read lose (as `raced`)
    * instead of stealing the new owner's lease. (Review finding B1, round 4.)
    */
-  releaseIfUnchanged(orderId: string, expectedUpdatedAt: number): boolean {
+  releaseIfUnchanged(orderId: string, expectedRev: number): boolean {
     const res = this.db.run(
-      `UPDATE gate_orders SET status = 'awaiting_payment', updated_at = ?
-       WHERE order_id = ? AND status = 'settlement_reserved' AND updated_at = ?`,
-      [Date.now(), orderId, expectedUpdatedAt],
+      `UPDATE gate_orders SET status = 'awaiting_payment', updated_at = ?, rev = rev + 1
+       WHERE order_id = ? AND status = 'settlement_reserved' AND rev = ?`,
+      [Date.now(), orderId, expectedRev],
     );
     return Number(res.changes ?? 0) === 1;
   }
 
   /**
-   * Append an operator compensation to the audit log. Deliberately an INSERT, not
-   * an upsert: a second compensation (a correction, or a refund following an
-   * abandonment) must ADD to the history rather than erase the first entry.
-   * Readers that want "the current state" take the LAST record per order.
+   * Append an operator compensation to the audit log, but ONLY while the order row
+   * is still the revision the operator judged: a single conditional INSERT whose
+   * SELECT is gated on `(order_id, status, rev)`. It returns false when the row
+   * moved in between (a caller settled it, or another operator released it), so a
+   * compensation can never be recorded against an order that has since succeeded.
+   * (Review finding H2, round 5.)
+   *
+   * Deliberately an INSERT, not an upsert: a second compensation (a correction, or
+   * a refund following an abandonment) must ADD to the history rather than erase
+   * the first entry. Readers that want "the current state" take the LAST record.
    */
-  putResolution(resolution: GateResolution): void {
-    this.db.run(
-      `INSERT INTO gate_recovery (order_id, outcome, note, at) VALUES (?, ?, ?, ?)`,
-      [resolution.orderId, resolution.outcome, resolution.note, resolution.at],
+  putResolution(resolution: GateResolution, expect: { status: GateOrderStatus; rev: number }): boolean {
+    const res = this.db.run(
+      `INSERT INTO gate_recovery (order_id, outcome, note, at)
+       SELECT ?, ?, ?, ?
+       WHERE EXISTS (SELECT 1 FROM gate_orders
+                     WHERE order_id = ? AND status = ? AND rev = ?)`,
+      [
+        resolution.orderId,
+        resolution.outcome,
+        resolution.note,
+        resolution.at,
+        resolution.orderId,
+        expect.status,
+        expect.rev,
+      ],
     );
+    return Number(res.changes ?? 0) === 1;
   }
 
   /**
@@ -265,6 +295,7 @@ export class SqliteGateStore implements GateOrderStore {
            THEN excluded.proof_hash
            ELSE COALESCE(excluded.proof_hash, gate_orders.proof_hash)
          END,
+         rev=gate_orders.rev + 1,
          updated_at=excluded.updated_at`,
       [
         order.orderId,

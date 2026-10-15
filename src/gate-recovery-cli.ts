@@ -53,14 +53,28 @@ interface Flags {
 const BOOLEAN_FLAGS = new Set(["force", "help"]);
 const KNOWN_FLAGS = new Set(["db", "order", "outcome", "note", "lease-min", "force", "help"]);
 
-function parseFlags(argv: string[]): Flags | string {
+/**
+ * Flags each command actually honours. A flag outside the set is a USAGE ERROR,
+ * not silently ignored: `compensate --force` must not look like it has a
+ * break-glass guard when it does not, and `release --outcome` must not look like
+ * it records anything. (Review finding L1, round 5.)
+ */
+const COMMAND_FLAGS: Record<string, ReadonlySet<string>> = {
+  list: new Set(["db", "lease-min", "help"]),
+  release: new Set(["db", "order", "lease-min", "force", "help"]),
+  compensate: new Set(["db", "order", "outcome", "note", "help"]),
+};
+
+function parseFlags(argv: string[], command: string): Flags | string {
   const values = new Map<string, string>();
   const booleans = new Set<string>();
+  const allowed = COMMAND_FLAGS[command] ?? KNOWN_FLAGS;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (!arg.startsWith("--")) return `unexpected argument: ${arg}`;
     const name = arg.slice(2);
     if (!KNOWN_FLAGS.has(name)) return `unknown flag: --${name}`;
+    if (!allowed.has(name)) return `--${name} is not a valid option for \`${command}\``;
     if (BOOLEAN_FLAGS.has(name)) {
       booleans.add(name);
       continue;
@@ -103,7 +117,7 @@ export async function main(argv: string[], io: CliIo = console): Promise<number>
     return command === undefined ? 2 : 0;
   }
 
-  const parsed = parseFlags(argv.slice(1));
+  const parsed = parseFlags(argv.slice(1), command);
   if (typeof parsed === "string") {
     io.error(`usage error: ${parsed}`);
     io.error(USAGE);
@@ -206,6 +220,14 @@ function releaseCommand(store: SqliteGateStore, leaseMs: number, flags: Flags, i
           ` - a terminal order must never be resurrected`,
       );
       return 1;
+    case "compensated":
+      io.error(
+        `refused: ${orderId} has a recorded compensation (refunded/abandoned), so it is CLOSED.` +
+          ` Releasing it would let a retry run the action and the customer would hold both the` +
+          ` compensation and the service. Record a new compensation note instead if the decision` +
+          ` changed; do not release.`,
+      );
+      return 1;
     case "lease_active":
       io.error(
         `refused: ${orderId} is only ${((result.ageMs ?? 0) / 60_000).toFixed(1)}min into a ` +
@@ -245,6 +267,11 @@ function compensateCommand(store: SqliteGateStore, flags: Flags, io: CliIo): num
   }
   if (result.refusal === "not_found") {
     io.error(`refused: no order ${orderId} in this database`);
+  } else if (result.refusal === "raced") {
+    io.error(
+      `refused: ${orderId} moved while the compensation was being recorded (it settled, or was` +
+        ` released). Nothing was written - re-read it and decide again.`,
+    );
   } else {
     const status = store.get(orderId)?.status ?? "unknown";
     io.error(

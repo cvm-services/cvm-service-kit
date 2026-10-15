@@ -14,7 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqliteGateStore } from "./gate-store.ts";
+import { SqliteGateStore, type GateResolution } from "./gate-store.ts";
 import {
   DEFAULT_RESERVATION_LEASE_MS,
   findStuckOrders,
@@ -380,12 +380,13 @@ describe("gate recovery: round-2 review findings", () => {
     expect(claims).toBe(1);
   }, 30_000);
 
-  test("B1 round-4: a STALE operator read cannot cancel a live caller's re-claim", () => {
+  test("B1 round-4 / M1 round-5: a STALE read cannot cancel a live re-claim — even in the same ms", () => {
     // The exact interleaving the round-4 review described, driven THROUGH
     // releaseReservation. A reads the row in `get()`; before A's CAS lands, B
-    // releases it and a caller C re-claims it back to `settlement_reserved` with a
-    // FRESH updated_at. A status-only CAS would match that status again and cancel
-    // C's live lease without --force. The version-predicated CAS must lose.
+    // releases it and a caller C re-claims it back to `settlement_reserved`. A
+    // status-only CAS would match that status again and cancel C's live lease.
+    // `updated_at` alone would ALSO match when the two transitions land in the same
+    // millisecond — so the CAS uses the monotonic `rev` (round-5 finding M1).
     const { store } = mkStore();
     crashAfterClaim(store, "aba3");
     const observed = store.get("aba3")!;
@@ -397,17 +398,15 @@ describe("gate recovery: round-2 review findings", () => {
         const row = store.get(id);
         if (!interfered) {
           interfered = true;
-          // B releases (with a long-expired view), then C re-claims.
-          expect(store.releaseIfUnchanged(id, observed.updatedAt)).toBe(true);
+          // B releases using the revision it inspected, then C re-claims.
+          expect(store.releaseIfUnchanged(id, observed.rev ?? 0)).toBe(true);
           expect(store.claim(id, "awaiting_payment", "settlement_reserved")).toBe(true);
         }
-        return row; // A's STALE snapshot: old updatedAt, expired lease
+        return row; // A's STALE snapshot
       },
       list: (s: Parameters<SqliteGateStore["list"]>[0]) => store.list(s),
       listResolutions: () => store.listResolutions(),
       releaseIfUnchanged: (id: string, exp: number) => store.releaseIfUnchanged(id, exp),
-      // Present so the mutation harness can reinstate the ORIGINAL status-only CAS
-      // (M-R4a) and watch this test catch it. The production path must NOT use it.
       claim: (id: string, from: GateOrder["status"], to: GateOrder["status"]) =>
         store.claim(id, from, to),
     } as unknown as SqliteGateStore;
@@ -417,8 +416,114 @@ describe("gate recovery: round-2 review findings", () => {
     });
     expect(out.released).toBe(false);
     expect(out.refusal).toBe("raced"); // NOT a silent success
-    // C's live claim survived: one owner, still reserved.
-    expect(store.get("aba3")!.status).toBe("settlement_reserved");
+    // C's live claim survived, and the row advanced one revision per transition.
+    const after = store.get("aba3")!;
+    expect(after.status).toBe("settlement_reserved");
+    expect(after.rev).toBe((observed.rev ?? 0) + 2);
+    // The round-5 point: the version is monotonic, so it does not matter whether
+    // the two transitions shared a millisecond.
+    expect(after.rev).not.toBe(observed.rev);
+  }, 30_000);
+
+  test("H1 round-5: a COMPENSATED reservation can never be released (no refund AND service)", async () => {
+    const { store, path } = mkStore();
+    crashAfterClaim(store, "comp1");
+
+    // The operator checked the venue, found it delivered, and refunded the customer.
+    expect(recordCompensation(store, "comp1", { outcome: "refunded", note: "venue confirms" }).recorded)
+      .toBe(true);
+
+    // A release afterwards would let a retry run the action: the customer would
+    // hold both the refund and the service. It must be REFUSED - even with --force,
+    // and even with a long-expired lease.
+    const expired = releaseReservation(store, "comp1", { now: 10 * 60 * MINUTE });
+    expect(expired.released).toBe(false);
+    expect(expired.refusal).toBe("compensated");
+    const forced = releaseReservation(store, "comp1", { now: 10 * 60 * MINUTE, force: true });
+    expect(forced.released).toBe(false);
+    expect(forced.refusal).toBe("compensated");
+    expect(store.get("comp1")!.status).toBe("settlement_reserved");
+
+    // And end to end through the CLI (exit 1, nothing moved).
+    const cap = captureIo();
+    expect(await cliMain(["release", "--db", path, "--order", "comp1", "--force"], cap.io)).toBe(1);
+    expect(cap.errors.join("\n")).toContain("CLOSED");
+    expect(store.get("comp1")!.status).toBe("settlement_reserved");
+    store.close();
+  }, 30_000);
+
+  test("H2 round-5: a compensation cannot be recorded for a row that moved (it settled)", () => {
+    const { store } = mkStore();
+    crashAfterClaim(store, "race2");
+    const observed = store.get("race2")!;
+    expect(observed.status).toBe("settlement_reserved");
+
+    // The action finishes successfully between the operator's read and the write.
+    expect(store.claim("race2", "settlement_reserved", "settled")).toBe(true);
+
+    // The conditional append must lose: no refund is recorded against an order
+    // that actually succeeded.
+    const stale = {
+      get: () => observed, // the STALE snapshot
+      list: (s: Parameters<SqliteGateStore["list"]>[0]) => store.list(s),
+      listResolutions: () => store.listResolutions(),
+      putResolution: (r: GateResolution, expect: { status: GateOrder["status"]; rev: number }) =>
+        store.putResolution(r, expect),
+    } as unknown as SqliteGateStore;
+
+    const res = recordCompensation(stale, "race2", { outcome: "refunded", note: "too late" });
+    expect(res.recorded).toBe(false);
+    expect(res.refusal).toBe("raced");
+    expect(store.listResolutions()).toHaveLength(0);
+    store.close();
+  }, 30_000);
+
+  test("M2 round-5: a zero/epoch `updatedAt` also FAILS CLOSED", () => {
+    const epochOrder: GateOrder = {
+      ...awaiting("epoch1"),
+      status: "settlement_reserved",
+      updatedAt: 0, // finite, but "no real timestamp was ever written"
+    };
+    let releases = 0;
+    const stub = {
+      get: () => epochOrder,
+      list: () => [epochOrder],
+      listResolutions: () => [],
+      releaseIfUnchanged: () => {
+        releases++;
+        return true;
+      },
+    } as unknown as SqliteGateStore;
+
+    const report = findStuckOrders(stub, { now: 999 * MINUTE });
+    expect(report.reserved[0]!.leaseExpired).toBe(false);
+    const out = releaseReservation(stub, "epoch1", {});
+    expect(out.refusal).toBe("lease_active");
+    expect(releases).toBe(0); // the guard ran; 0 is NOT "infinitely old"
+  }, 30_000);
+
+  test("L1 round-5: a flag the command does not honour is a USAGE ERROR, not silently ignored", async () => {
+    const { store, path } = mkStore();
+    crashAfterClaim(store, "flag1");
+    const cap = captureIo();
+
+    // `compensate` has no break-glass: accepting --force would imply it does.
+    expect(await cliMain(
+      ["compensate", "--db", path, "--order", "flag1", "--outcome", "refunded", "--note", "x", "--force"],
+      cap.io,
+    )).toBe(2);
+    expect(cap.errors.join("\n")).toContain("not a valid option for `compensate`");
+
+    // `list` has no --force either, and `release` records no --outcome.
+    const cap2 = captureIo();
+    expect(await cliMain(["list", "--db", path, "--force"], cap2.io)).toBe(2);
+    const cap3 = captureIo();
+    expect(await cliMain(
+      ["release", "--db", path, "--order", "flag1", "--outcome", "refunded"],
+      cap3.io,
+    )).toBe(2);
+    expect(store.get("flag1")!.status).toBe("settlement_reserved");
+    store.close();
   }, 30_000);
 
   test("B5 round-4: the CURRENT compensation is the last WRITTEN, not the largest `at`", () => {

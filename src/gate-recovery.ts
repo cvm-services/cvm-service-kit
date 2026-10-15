@@ -70,13 +70,22 @@ export interface StuckReport {
   legacy: StuckOrder[];
 }
 
+/**
+ * Is this `updatedAt` a usable age origin? A zero (or negative) value is finite
+ * but means "no real timestamp was ever written", and using it would compute an
+ * enormous age and skip the lease refusal entirely.
+ */
+function usableAge(updatedAt: number | undefined | null): updatedAt is number {
+  return typeof updatedAt === "number" && Number.isFinite(updatedAt) && updatedAt > 0;
+}
+
 function classify(order: GateOrder, now: number, leaseMs: number, resolution?: GateResolution): StuckOrder {
-  // FAIL CLOSED on an age we cannot compute: a non-finite `updatedAt` (a
-  // malformed or hand-edited row) must not read as "infinitely old, therefore
-  // safe to release". `Number.NaN` compares false against everything, so the
-  // unguarded form would have skipped the lease refusal entirely.
-  // (Review finding B6.)
-  const ageMs = Number.isFinite(order.updatedAt) ? Math.max(0, now - order.updatedAt) : Number.NaN;
+  // FAIL CLOSED on an age we cannot compute: a zero, negative or non-finite
+  // `updatedAt` (a malformed, defaulted or hand-edited row) must not read as
+  // "infinitely old, therefore safe to release". `0` is finite but yields a huge
+  // age, and `Number.NaN` compares false against everything — both would skip the
+  // lease refusal. (Review findings B6 round 3, M2 round 5.)
+  const ageMs = usableAge(order.updatedAt) ? Math.max(0, now - order.updatedAt) : Number.NaN;
   return { order, ageMs, leaseExpired: Number.isFinite(ageMs) && ageMs > leaseMs, resolution };
 }
 
@@ -101,7 +110,7 @@ export function findStuckOrders(store: SqliteGateStore, opts: InspectOptions = {
   };
 }
 
-export type ReleaseRefusal = "not_found" | "not_reserved" | "lease_active" | "raced";
+export type ReleaseRefusal = "not_found" | "not_reserved" | "compensated" | "lease_active" | "raced";
 
 export interface ReleaseResult {
   released: boolean;
@@ -132,23 +141,33 @@ export function releaseReservation(
   if (!order) return { released: false, refusal: "not_found" };
   if (order.status !== "settlement_reserved") return { released: false, refusal: "not_reserved", order };
 
-  const ageMs = Number.isFinite(order.updatedAt) ? Math.max(0, now - order.updatedAt) : Number.NaN;
+  // A COMPENSATED order is closed for business. `recordCompensation` deliberately
+  // accepts a reservation (the runbook's crashed-after-venue case), and a
+  // compensation is a decision about the money — usually a refund. Releasing it
+  // afterwards would let a retry run the action, so the customer could end up with
+  // BOTH the refund and the service. (Review finding H1, round 5.)
+  if (store.listResolutions().some((r) => r.orderId === orderId)) {
+    return { released: false, refusal: "compensated", order };
+  }
+
+  const ageMs = usableAge(order.updatedAt) ? Math.max(0, now - order.updatedAt) : Number.NaN;
   // FAIL CLOSED when the age is unknown: an un-computable age must refuse like a
   // live lease, never pass as "long since expired". See `classify`.
   if (!Number.isFinite(ageMs) || ageMs <= leaseMs) {
     if (!opts.force) return { released: false, refusal: "lease_active", order, ageMs, leaseMs };
   }
-  // Version-predicated CAS: the row must still be the exact revision inspected
-  // above (`settlement_reserved` AND the same `updated_at`). A status-only CAS
-  // would match a row that moved away and back (release -> re-claim -> reserved),
-  // letting a STALE operator read cancel a live caller's claim without --force.
-  // (Review finding B1, round 4.)
-  const released = store.releaseIfUnchanged(orderId, order.updatedAt);
+  // Version-predicated CAS on the monotonic `rev`: the row must still be the exact
+  // revision inspected above. A status-only CAS would match a row that moved away
+  // and back (release -> re-claim -> reserved), letting a STALE operator read
+  // cancel a live caller's claim. `updated_at` alone is not enough — two
+  // transitions inside one millisecond collide. (Review findings B1 round 4,
+  // M1 round 5.)
+  const released = store.releaseIfUnchanged(orderId, order.rev ?? 0);
   if (!released) return { released: false, refusal: "raced", order, ageMs, leaseMs };
   return { released: true, order, ageMs, leaseMs };
 }
 
-export type CompensationRefusal = "not_found" | "not_compensatable";
+export type CompensationRefusal = "not_found" | "not_compensatable" | "raced";
 
 /** Statuses an operator may record a compensation against. */
 export const COMPENSATABLE_STATUSES: readonly GateOrder["status"][] = [
@@ -198,6 +217,14 @@ export function recordCompensation(
     note: compensation.note,
     at: compensation.now ?? Date.now(),
   };
-  store.putResolution(resolution);
+  // Conditional append: the row must still be the revision judged above. A
+  // concurrent `settle` (or another operator's release) makes this lose, so a
+  // compensation can never be recorded for an order that has since succeeded.
+  // (Review finding H2, round 5.)
+  const recorded = store.putResolution(resolution, {
+    status: order.status,
+    rev: order.rev ?? 0,
+  });
+  if (!recorded) return { recorded: false, refusal: "raced" };
   return { recorded: true, resolution };
 }
