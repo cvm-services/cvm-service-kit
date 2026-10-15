@@ -810,6 +810,60 @@ usage error (`--force is not a valid option for `compensate``). Test: `L1`.
 The reviewer confirmed **B2, B3, B4, B6 closed**, and re-stated B1 as "conditionally closed"
 pending exactly what M1 addressed — which is now in place.
 
+## Round-6 cross-family review (2026-10-15) — the root cause the round-5 fix missed
+
+Fifth review, cold, of the round-5 source. Artifact:
+`~/reports/reviews/cvm-service-kit-pr17-F-final.md` (`VERDICT: REQUEST_CHANGES`).
+It found the **root cause** of the race round 5 only narrowed, plus four more real items.
+
+### C1 (CRITICAL) — `putResolution` did not version the order row
+
+Round 5's fix made `releaseReservation` check the compensation **log** and then CAS on `rev` —
+a separate read, so a compensation landing in the gap left the CAS to succeed. The reviewer
+named the cause exactly: the compensation did not move the order's version.
+
+**Fixed**: the compensation now lives on the **order row** as `compensated`, and
+`putResolution` does the order-row CAS first —
+`UPDATE gate_orders SET compensated = 1, rev = rev + 1 WHERE order_id = ? AND status = ? AND rev = ?`
+— and only then appends the audit row. `releaseReservation` reads `order.compensated` (one row,
+generation-scoped) and the CAS additionally requires `compensated = 0`. A compensation in the gap
+now makes the release lose as `raced`. Test: `C1`; **mutations M-R5b and M-R6a → CAUGHT**.
+
+### C2 (CRITICAL) — a compensated order could still be recorded as settled
+
+`recordCompensation` deliberately leaves the status alone, and the gate's terminal success write
+is a plain `put` — so a live caller could finish and record `settled` for an order whose money an
+operator had already refunded: the customer holding **both**. **Fixed inside the statement**:
+`put`'s upsert carries `WHERE gate_orders.compensated = 0 OR excluded.status <> 'settled'`, and a
+refused `settled` write **throws** rather than being silently dropped (the action DID run; the
+operator must reconcile). Test: `C2`; **mutation M-R6b → CAUGHT**.
+
+### H3/H4 (HIGH) — orderId reuse inherited the previous generation
+
+`put`'s upsert refreshed `status`, `result`, `failure`, `proof_hash` and `rev` but **not** the
+identity — so a reused `orderId` kept the old invoice and amount, and the gate would verify the
+new payment against the old invoice. The compensation log was also keyed by `orderId` alone, so a
+new generation inherited the previous one's compensation and could never be released.
+**Fixed**: the new-generation predicate now refreshes `tool`, `caller`, `amount_sats`,
+`invoice_json`, `created_at` and clears `compensated`; `findStuckOrders` attaches a resolution only
+when the order itself is `compensated`. Test: `H3/H4`; **mutation M-R6c → CAUGHT**.
+
+### M6 / L7 / L8 — the smaller ones
+
+- `TERMINAL_STATUSES` empty would have produced `IN ()` (a syntax error) — it now degrades to
+  `NULL` (matches nothing) rather than breaking every `put`.
+- `releaseReservation` no longer scans the whole append-only log (L7): it reads the order row.
+- `put` no longer lets `updated_at` run backwards (L8): `MAX(excluded.updated_at,
+  gate_orders.updated_at)`, so the operator's lease-age hint cannot be made to lie by a stale
+  writer. Test: `L8`; **mutation M-R6d → CAUGHT**.
+
+### Honest note on the loop
+
+Five rounds, five `REQUEST_CHANGES`, and every round produced at least one real defect — including
+two that my own previous fix introduced or failed to close. That is the evidence that the loop is
+worth its cost, and also the reason this branch is **not merged**: the verdict on the newest head
+has not been obtained. See REPORT.md §6.
+
 ## Independent self-check (SAME family — explicitly NOT a D-115 review)
 
 Every non-flash model lane was capacity-exhausted on this host when the pass ran —

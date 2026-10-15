@@ -410,3 +410,26 @@ worked its findings.
 - mutation at the final head: 12 mutants, 10 CAUGHT (including the three new ones), M-B6
   provably equivalent, and the harness REPORTS a drifted anchor as a failure - two anchors had
   drifted with the round-5 source and were repointed rather than left silently vacuous.
+
+## t_7233c336 — offload pass 6: the root cause the pass-5 fix only narrowed (2026-10-15)
+
+- round-6 review (cold) -> REQUEST_CHANGES, artifact ~/reports/reviews/cvm-service-kit-pr17-F-final.md.
+  Two CRITICALs, both real:
+  * C1: `putResolution` did not version the ORDER ROW, so the pass-5 "check the log then CAS" was
+    a separate read and a compensation landing in the gap still let the release through. FIXED:
+    the compensation is now `gate_orders.compensated` + `rev = rev + 1`, applied by the ORDER-ROW
+    CAS first (then the audit append); the release CAS requires `compensated = 0`.
+  * C2: a compensated order could still be RECORDED as settled by a live caller (refund AND
+    service). FIXED inside the statement: `put`'s upsert refuses `settled` when compensated, and
+    THROWS rather than silently dropping it.
+  * H3/H4: a reused orderId inherited the previous generation's invoice/amount and its
+    compensation. FIXED: the new-generation predicate refreshes identity fields and clears
+    `compensated`; `findStuckOrders` scopes a resolution to the compensated generation.
+  * M6 (empty TERMINAL_STATUSES would emit invalid SQL), L7 (log scan -> row read),
+    L8 (`updated_at` could run backwards) all fixed.
+- tests: recovery 20/20 (was 16). green: typecheck rc=0; `bun test src services` 342 pass /
+  1 skip / 0 fail; `deno check` rc=0; `deno task test` 29 passed / 0 failed.
+- mutation: 15 mutants, 14 CAUGHT, M-B6 provably equivalent, 0 unexplained survivors, exit 0.
+- NOT merged. Five rounds each returned REQUEST_CHANGES with at least one real defect (two of them
+  introduced/failed-to-close by my own earlier fix). The newest head has NOT been re-reviewed, so
+  the cross-family gate is unsatisfied and PR #17 stays open.
