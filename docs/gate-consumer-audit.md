@@ -133,6 +133,60 @@ services/cvm-sms4sats/src/tools.ts:188    res?.status === "completed" || res?.st
 services/cvm-sms4sats/src/upstream.ts:97  last?.status === "code_received"                                  # sms4sats API
 ```
 
+### F4b. The `===`-only grep above is narrower than the conclusion — widened (review finding A2)
+
+A cross-family re-review of this audit (finding A2) correctly noted that a single
+`grep -E '\.status *=== *"..."'` does not by itself establish *"no consumer branches on a
+gate status in ANY form"*: it would miss `!=`, `==`, `!==`, a `switch (x.status)` with
+`case`, single quotes, computed `x["status"]`, or a variable derived from `.status`. The
+conclusion is unchanged, but it now rests on a search that can actually see those forms.
+Every comparison-like use of `.status` in product code, with the sms4sats supplier-status
+and HTTP-status false positives removed:
+
+```
+$ grep -rn --include=*.ts -E '\.status\s*(===|!==|==|!=)|switch\s*\(.*\.status' src services \
+    | grep -v '\.test\.ts'
+src/gate-recovery.ts:116:  if (order.status !== "settlement_reserved") ...
+src/gate-recovery.ts:153:  if (order.status !== "settlement_failed") ...
+src/escalation.ts:308:      if (intent && intent.status !== "settled") {        # fiat intent, not GateOrder
+src/settlement.ts:107:    switch (intent.status) {                              # fiat intent, not GateOrder
+src/payment.ts:84:    next.status === "awaiting_payment" &&                 # the gate itself
+src/payment.ts:85:    TERMINAL_STATUSES.includes(prev.status)               # the gate itself
+src/payment.ts:338:    if (!cur || cur.status !== from) return false;        # the gate itself (CAS)
+src/payment.ts:394:    if (order.status === "settled") {                     # the gate itself
+src/payment.ts:411:    switch (order.status) {                               # the gate itself
+src/l402.ts:50:  if (first.status !== 402) {                           # HTTP status
+services/cvm-lambda/src/server.ts:221:  if (j.status !== "succeeded" && j.status !== "failed") {  # supplier job
+services/cvm-sms4sats/src/upstream.ts:96:  if (last?.status && TERMINAL.has(last.status)) ...       # sms4sats API
+services/cvm-sms4sats/src/upstream.ts:97:  if (last?.status === "code_received") ...                 # sms4sats API
+services/cvm-sms4sats/src/tools.ts:154:  if (quote.status !== 402 || !quote.challenge ...) {      # HTTP status
+```
+
+Every `GateOrderStatus`-typed comparison is inside `src/payment.ts` (the gate) or
+`src/gate-recovery.ts` (this branch's operator module, whose two `!==` guards *refuse*
+anything that is not `settlement_reserved` / `settlement_failed` — i.e. they fail closed).
+The `escalation.ts` / `settlement.ts` hits are the **fiat intent** state machine on a
+different type; `l402.ts` / `tools.ts` are HTTP; `lambda/server.ts` / `upstream.ts` are
+supplier statuses. No service reads a `GateOrder.status`.
+
+The literal-string search agrees — this is the check that does not depend on the
+comparison operator at all:
+
+```
+$ for s in awaiting_payment settlement_reserved settlement_failed refused; do
+    echo "== $s"; grep -rn --include=*.ts "\"$s\"" services/ | grep -v '\.test\.ts'; done
+== awaiting_payment         (no matches)
+== settlement_reserved      (no matches)
+== settlement_failed        (no matches)
+== refused                  2 matches, both comment PROSE, not comparisons:
+   services/jlc-quote/src/types.ts:7:   ... a refusal carries no ...
+   services/cvm-2fiat/src/hygiene.ts:17: ... "not implemented" and "refused" are different claims ...
+```
+
+So no `GateOrderStatus` literal occurs in any service's *code*; the only two hits are
+English prose in comments, in two services that do not touch the gate (`cvm-jlc-quote`
+runs `PAYMENT_MODE: "none"`).
+
 Similarly, no consumer catches the error classes. `SettlementFailedError`,
 `SettlementInProgressError` and `GateOrderStateError` appear in **no** service product
 code — the only references outside `src/payment.ts` are test files
@@ -172,6 +226,35 @@ control so the test cannot pass vacuously:
   `runs === 1`.
 * Mutant reverting `buildGate` to `new ExplicitGate(processor)` → the durability test
   fails with `Expected: "sent-1" / Received: "sent-2"` (measured).
+
+### F5b. The cutover window this fix does NOT retroactively close (review finding A1)
+
+A cross-family re-review (finding A1) raised the one window the fix cannot close, and it is
+real: the durability fix starts a **fresh, empty** `gate.sqlite`. A payment that was settled
+by the *old* in-memory gate has no row in the new file, so the first replay of a
+**pre-upgrade** proof after the upgrade re-verifies against a still-settled invoice and can
+run the tool a second time. That is the same mechanism F5 cites.
+
+Two things bound it, and neither is a substitute for the ops step:
+
+1. **It is not a regression — it is the pre-existing behaviour, bounded.** Before the fix the
+   in-memory Map was erased on *every* `Restart=always`, so the whole settlement history was
+   replayable at all times. After the fix the exposed set is exactly the orders that were
+   settled *and still resident in RAM* at the moment of cutover. The fix strictly shrinks the
+   window from "always" to "the in-flight set at cutover", and closes it permanently
+   afterwards. The reviewer's proposed falsification — seed a processor whose `verify`
+   accepts a pre-upgrade proof, call the tool twice, observe `runs === 2` — is exactly the
+   branch's own pre-fix CONTROL test, which already asserts those `runs === 2`. It is
+   demonstrable today; it is the shape of the bug, not of the fix.
+2. **It is not closeable by backfill.** The gate row needs the outcome that was never
+   written (the old store wrote nothing durable) and the `proofHash` binding. A row invented
+   at cutover would assert a settlement the gate cannot evidence.
+
+**The mitigation is an ops step, not code**, and it is now in the runbook
+(`docs/gate-recovery-runbook.md` § "Upgrading a service to the durable gate"): stop taking
+new paid work, let the in-flight actions drain, then upgrade. The residual is stated rather
+than engineered away, because the honest fix for "the old store recorded nothing" is not a
+migration — it is never having had the old store.
 
 ## F6. Multi-replica exposure of `MemoryOrderStore` — measured, not assumed
 
@@ -363,6 +446,134 @@ a detached worktree at pristine `github/main` (`b9a50bf`) reports the identical
 `0 pass / 3 fail / 3 errors` for `bun test tests`. Those files belong to the **Deno** lane,
 where they pass (`deno task test` → 29 passed / 0 failed). The bun suite of record is
 therefore `bun test src services`, which is green.
+
+## Round-2 cross-family review (2026-10-15) — findings, and their closure
+
+A genuine cross-family review was obtained this round (the recovery path earlier reported
+to be unobtainable). The lane that served was the oneshot harness against `kimi-k2.7-code`,
+which the flat router served as **`deepseek-flash`** — a different family from the glm/zai
+author, so D-115 is satisfied by lineage; the *requested* lineage was lost to a substitution
+and that is stated rather than hidden. Artifact:
+`~/reports/reviews/cvm-service-kit-pr17-A2-audit.md` (`VERDICT: REQUEST_CHANGES`).
+Its findings were overwhelmingly **"the supplied material did not contain the evidence"**
+rather than "the code is wrong" — so each is closed below *with the evidence*, and the
+audit doc now carries it. Nothing here was dismissed.
+
+### A2-B1 (BLOCKER): the F4 grep is narrower than the conclusion
+
+**Accepted — and it was a fair hit on the evidence, not the conclusion.** The reviewer's own
+suggested falsifier was `grep -rn --include=*.ts -i 'paid' services`. Run:
+
+```
+$ grep -rn --include=*.ts -i 'paid' services/ | grep -v '\.test\.ts'
+```
+
+Every hit is English prose or an unrelated field: tool `description` strings ("paid per
+call", "idempotency key for a paid call"), comments, the `mock-l402.ts` mock server's own
+`{ paid: boolean }` order flag, and `cvm-lambda/tools/mint-testnut.ts` reading a **mint
+quote** state (`"PAID"` / `"ISSUED"`, a Cashu mint state, not a `GateOrderStatus`). No hit is
+a comparison against a gate status. The operator-independent literal search and the widened
+comparison search are in **F4b** above; both agree. Conclusion unchanged: no consumer
+branches on a `GateOrder.status` in any form.
+
+### A2-B2 (BLOCKER): casts or structural construction of a store
+
+**Accepted — the greps did not cover `as GateOrderStore` / `as any` / an inline literal.**
+Run:
+
+```
+$ grep -rn --include=*.ts -E "as GateOrderStore|as any|<GateOrderStore>" src services | grep -v '\.test\.ts'
+```
+
+**Zero `as GateOrderStore` and zero `<GateOrderStore>`.** The `as any` hits are all
+`bun:sqlite` row casts (`this.db.query(...).get(id) as any`) in `src/gate-store.ts`,
+`src/intent-store.ts`, `src/proof-store.ts`, `src/escalation.ts`,
+`services/cvm-lambda/src/jobs.ts` — none is a store construction. And the structurally
+dangerous form the reviewer named (an inline object literal passed as the second argument)
+is ruled out by reading every construction site in full, not just its first line:
+
+```
+$ for f in cvm-lambda:118 cvm-sms4sats:93 cvm-2fiat:95 cvm-ppq:21 cvm-nanogpt:16 cvm-deepinfra:26; do
+    svc=${f%%:*}; ln=${f##*:}; sed -n "$((ln-2)),$((ln+8))p" services/$svc/src/server.ts; done
+```
+
+All six resolve to `new SqliteGateStore(<path>)` — five inline in the guarded ternary
+(`paymentMode === "cashu" && priceSats > 0 ? new ExplicitGate(proc, new SqliteGateStore(...)) : undefined`)
+and one in `buildGate`. There is no object-literal store and no cast anywhere.
+
+### A2-HIGH: the sms4sats state directory is asserted, not verified
+
+**Accepted as a fair challenge; the evidence removes it.** `SqliteGateStore` does no
+`mkdir` — `new Database(path)` then `CREATE TABLE IF NOT EXISTS` — so a missing parent
+directory would indeed throw at startup. Two independent pieces of evidence close it:
+
+1. **The role creates it, with the right owner.** `deploy/ansible/playbook-wrappers.yml:46`
+   declares `state_dir: /var/lib/loom/cvm-sms4sats`, which the role consumes at
+   `tasks/main.yml:154` (`cvm_service_state_dir: "{{ item.state_dir }}"`) and creates at
+   `tasks/main.yml:137-143`:
+   ```
+   path: "{{ cvm_service_state_dir }}"   state: directory
+   owner: "{{ cvm_service_user }}"       group: "{{ cvm_service_user }}"   mode: "0755"
+   ```
+2. **The directory is not new — the service already writes two SQLite files into it.**
+   `ORDER_DB: /var/lib/loom/cvm-sms4sats/orders.sqlite` and
+   `CASHU_WALLET_DB: /var/lib/loom/cvm-sms4sats/cashu.sqlite` are in the same wrapper block
+   and have been in production. If that directory were absent or unwritable, `cvm-sms4sats`
+   would already fail on its order book and wallet today. The same
+   `/var/lib/loom/<svc>/gate.sqlite` path shape is already declared for `cvm-nanogpt`
+   (`:78`), `cvm-ppq` (`:94`) and `cvm-2fiat` (`:110`), so the prerequisite is load-bearing
+   for five services, not introduced by this branch.
+
+Residual, stated: the wrapper line itself is an **IaC change and remains unexecuted on a
+live node from this host** (no managed target, no fleet credentials) — the fleet agreement
+requires a read-back from the node, and the argument above is an argument, not that
+read-back. It is one additive env var, defaulted in code, on a path the service already uses.
+
+### A2-MED: "no consumer catches the error classes" is name-only
+
+**Accepted as a limit of the evidence; the broader search agrees.** A consumer could catch
+generically and branch on `e.name` / `e.code`. Every `catch` in `services/` product code:
+
+```
+$ grep -rn --include=*.ts -E "catch\s*\(|\.name\s*===|\.code\s*===|instanceof" services/ | grep -v '\.test\.ts'
+```
+
+is one of: a top-level `main().catch((e) => console.error("FATAL:", ...))` fatal logger
+(`cvm-lambda:304`, `cvm-sms4sats:176`, `cvm-2fiat:194`, `cvm-ppq:74`, `cvm-nanogpt:129`-ish,
+`jlc-quote:171`), the shared `health.ts` probe wrapper, or a tool-level adapter catch. **None
+inspects an error `name`/`code`, and none catches a gate error class** — no `instanceof
+Settlement*` exists in any service. Services see a refusal only as an `isError: true` tool
+result.
+
+### A2-LOW: the "no replica deployment" search is under-searched
+
+**Accepted; widened.** The named alternatives — systemd `@` instancing, `--workers`, `pm2`,
+`docker-compose`, Kubernetes manifests:
+
+```
+$ grep -rn -E "systemd.*@|@\.service|--workers|pm2|docker-compose|kind: Deployment" deploy/ src/ services/
+```
+
+The only match is `cvm-lambda/.../build-rootfs.sh` writing
+`serial-getty@ttyS0.service.d/autologin.conf` — an **OS getty** on the built rootfs image,
+not service instancing. No `@`-instanced unit, no worker/process manager, no compose file,
+no Deployment manifest anywhere in the tree. F6's conclusion holds.
+
+### Settled from the review's COULD_NOT_VERIFY block (not filed — retired)
+
+| open question from the reviewer | resolution |
+| --- | --- |
+| the second argument at each `new ExplicitGate(` site | all six shown verbatim above: `new SqliteGateStore(...)` |
+| `SqliteGateStore` internals (creates DB/table? handles a fresh path?) | `src/gate-store.ts:34-59`: `new Database(path)`, `PRAGMA busy_timeout = 5000`, `CREATE TABLE IF NOT EXISTS gate_orders (... order_id TEXT PRIMARY KEY ...)`; no `mkdir` (hence A2-HIGH) |
+| the `cvm_service` role dir task + the real `GATE_DB` hunk | quoted above (`tasks/main.yml:137-143`, `playbook-wrappers.yml:46,61`) |
+| `gate-durability.test.ts` contents / control result | 3 tests: `CONTROL: an in-memory gate store really does lose settlement across a restart`, `buildGate gives the gate a durable store: a replay after restart never re-runs`, `the gate database defaults into the service state dir and honours GATE_DB` |
+| `bun run typecheck` on head `6395631` | `tsc --noEmit` rc=0 (run this round) |
+| whole-tree `bun test` + Deno lane | `bun test src services` **328 pass / 1 skip / 0 fail** (329 tests, 43 files) rc=0 (run this round); Deno lane: see the Merge note 2 caveat about `tests/` |
+| `ExplicitGate` constructor + `GateOrderStore` interface | `private readonly store: GateOrderStore = new MemoryOrderStore()` (`src/payment.ts:356`); the interface is in `src/payment.ts`; `claim` is required and both kit stores define it |
+| `as any` / dynamic import / re-export store construction | closed by A2-B2 above: none |
+| every alternative status-comparison form | closed by F4b + A2-B1 above |
+| `cvm-jlc-quote` does not touch the gate; `contextvm-services` vendors no `payment.ts` | from the audit: `cvm-jlc-quote` runs `PAYMENT_MODE: "none"` and appears in no `new ExplicitGate(` site; `contextvm-services` vendors only `announce/mod/validate/vocab` |
+| `@` instancing / workers / compose / k8s in `deploy/` | closed by A2-LOW above: none |
 
 ## Independent self-check (SAME family — explicitly NOT a D-115 review)
 

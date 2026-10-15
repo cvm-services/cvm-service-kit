@@ -90,6 +90,27 @@ replay throwing `SettlementFailedError` instead of re-running the failed action.
 compensation is bookkeeping about the money; it is not a licence to retry. Do not edit
 `gate_orders` by hand to "clear" a row — the status is the money-safety fact.
 
+## Upgrading a service to the durable gate (the cutover window)
+
+A service whose gate was built over `MemoryOrderStore` (the in-process Map) has **no durable
+record of what it settled**. `cvm-sms4sats` was the last such service and now builds
+`buildGate(processor, cfg.gateDb)`; the same applies to any future service adopting
+`SqliteGateStore` for the first time.
+
+The new `gate.sqlite` starts **empty**, so a proof that was settled *before* the upgrade has
+no row to match and the first replay after the upgrade can re-run the action. This window is
+not closable by migration — the old store recorded nothing to migrate — so treat it as a
+deployment step:
+
+1. Stop taking new paid work for the service (`PAYMENT_MODE=none`, or drain the wrapper).
+2. Let in-flight actions finish (the "reserved" rows are the in-flight set).
+3. Deploy the version with `GATE_DB` set, then re-enable paid work.
+
+The exposed set is exactly the orders that were settled *and still resident in RAM* at the
+moment of cutover; after the cutover the window is closed permanently. Before the fix the
+same set was replayable on **every** restart, so this is a strict narrowing, not a new risk.
+Full reasoning: `docs/gate-consumer-audit.md` § F5b.
+
 ## Hard rules
 
 - Never auto-release, never add a timeout sweep that flips rows on its own. Any such
