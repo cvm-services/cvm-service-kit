@@ -6,10 +6,12 @@ set -u
 cd "$(dirname "$0")/../.." || exit 1
 
 HEAD_SHA="$(git rev-parse HEAD)"
-DIRTY="$(git status --porcelain)"
+# Exclude the transcript this very run writes: a redirect into the output file would
+# otherwise always report DIRTY and hide a REAL dirty tree. Anything else still shows.
+DIRTY="$(git status --porcelain | grep -v '^ M evidence/recovery/cli_smoke_round2.txt$')"
 echo "# gate-recovery CLI smoke"
 echo "# HEAD: $HEAD_SHA"
-if [ -n "$DIRTY" ]; then echo "# working tree: DIRTY"; echo "$DIRTY" | sed 's/^/#   /'; else echo "# working tree: clean"; fi
+if [ -n "$DIRTY" ]; then echo "# working tree: DIRTY (excluding this transcript)"; echo "$DIRTY" | sed 's/^/#   /'; else echo "# working tree: clean (excluding this transcript)"; fi
 echo "# source blobs:"
 for f in src/gate-recovery.ts src/gate-recovery-cli.ts src/gate-store.ts src/gate-recovery.test.ts; do
   echo "#   $(git hash-object "$f")  $f"
