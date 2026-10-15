@@ -27,12 +27,11 @@ MUTATIONS = [
     ("M-B4  remove the --lease-min lower bound (shrink the guard instead of --force)",
      "src/gate-recovery-cli.ts",
      'if (minutes < DEFAULT_RESERVATION_LEASE_MS / 60_000) {', 'if (false) {', None),
-    ("M-B5  revert putResolution to an upsert (the log loses history)", "src/gate-store.ts",
-     '`INSERT INTO gate_recovery (order_id, outcome, note, at) VALUES (?, ?, ?, ?)`',
-     '`INSERT INTO gate_recovery (order_id, outcome, note, at) VALUES (?, ?, ?, ?)'
-     ' ON CONFLICT(order_id) DO UPDATE SET outcome=excluded.outcome,'
-     ' note=excluded.note, at=excluded.at`',
-     None),
+    ("M-B5  listResolutions(): collapse the log to one record per order (history lost)",
+     "src/gate-store.ts",
+     'SELECT * FROM gate_recovery ORDER BY seq ASC',
+     'SELECT * FROM gate_recovery WHERE seq = (SELECT MAX(seq) FROM gate_recovery g2 '
+     'WHERE g2.order_id = gate_recovery.order_id) ORDER BY seq ASC', None),
     ("M-B6  classify(): drop the Number.isFinite guard on the lease flag", "src/gate-recovery.ts",
      'leaseExpired: Number.isFinite(ageMs) && ageMs > leaseMs', 'leaseExpired: ageMs > leaseMs',
      "EQUIVALENT: ageMs is NaN exactly when Number.isFinite(ageMs) is false, and `NaN > x` is "
@@ -42,7 +41,7 @@ MUTATIONS = [
      None),
     ("M-R4a releaseReservation(): status-only CAS (the ABA the round-4 review found)",
      "src/gate-recovery.ts",
-     'const released = store.releaseIfUnchanged(orderId, order.updatedAt);',
+     'const released = store.releaseIfUnchanged(orderId, order.rev ?? 0);',
      'const released = store.claim(orderId, "settlement_reserved", "awaiting_payment");',
      None),
     ("M-R4b listResolutions(): order by `at` instead of insertion order", "src/gate-store.ts",
