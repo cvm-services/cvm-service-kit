@@ -272,6 +272,26 @@ export interface GateOrder {
    * present the same evidence before the cached result is handed back.
    */
   proofHash?: string;
+  /**
+   * True once an operator has resolved the MONEY for this order generation (a
+   * refund or an explicit abandonment). It is a flag on the order row, not just a
+   * row in the compensation log, for two reasons: the release CAS can then test it
+   * in the SAME statement that moves the order (a separate read leaves a race), and
+   * a reused `orderId` starts a new generation un-compensated.
+   * (Review findings C1/H4, round 6.)
+   */
+  compensated?: boolean;
+  /**
+   * Monotonic revision, incremented by store on EVERY mutation of the row.
+   *
+   * A wall-clock `updatedAt` is not a version: two transitions inside one
+   * millisecond produce the same value, so a compare-and-set on it can match a
+   * row that moved away and came back. `rev` is strictly increasing per row, which
+   * is what an operator-facing CAS needs. Optional because `MemoryOrderStore` (a
+   * test double) and pre-existing rows do not carry it; `SqliteGateStore` always
+   * writes it. (Review finding M1, round 5.)
+   */
+  rev?: number;
   createdAt: number;
   updatedAt: number;
 }

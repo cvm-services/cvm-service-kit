@@ -2,6 +2,7 @@ import {
   CashuProcessor,
   CvmServer,
   ExplicitGate,
+  SqliteGateStore,
   SqliteOrderStore,
   Treasury,
   markupForMargin,
@@ -34,6 +35,11 @@ interface Config {
   paymentMode: "cashu" | "none";
   cashuMintUrl: string;
   orderDb: string;
+  /**
+   * Durable store for the CEP-8 settlement gate. Without it the gate falls back
+   * to an in-process Map and every restart forgets which payments were settled.
+   */
+  gateDb: string;
   announce: boolean;
   d: string;
   serviceClass: string;
@@ -51,7 +57,7 @@ class FakeProcessorNone {
   }
 }
 
-function configFromEnv(env: Record<string, string | undefined>): Config {
+export function configFromEnv(env: Record<string, string | undefined>): Config {
   const secretKey = env.SERVER_SECRET_KEY ?? env.SERVER_HEX;
   if (!secretKey) throw new Error("SERVER_SECRET_KEY is required (64 hex chars)");
   return {
@@ -64,11 +70,27 @@ function configFromEnv(env: Record<string, string | undefined>): Config {
     paymentMode: (env.PAYMENT_MODE as Config["paymentMode"]) ?? "cashu",
     cashuMintUrl: env.CASHU_MINT_URL ?? "https://testnut.cashu.exchange",
     orderDb: env.ORDER_DB ?? "/var/lib/loom/cvm-sms4sats/orders.sqlite",
+    gateDb: env.GATE_DB ?? "/var/lib/loom/cvm-sms4sats/gate.sqlite",
     announce: (env.ANNOUNCE ?? "true") !== "false",
     d: env.ANNOUNCE_D ?? "cvm-sms4sats-01",
     serviceClass: env.SERVICE_CLASS ?? "sms",
     sms4satsBase: env.SMS4SATS_BASE ?? "https://api.sms4sats.com",
   };
+}
+
+/**
+ * Build the CEP-8 settlement gate over a DURABLE order store.
+ *
+ * `ExplicitGate` defaults to `MemoryOrderStore`, which is an in-process Map.
+ * This service already keeps its own orders in SQLite (`SqliteOrderStore`), but
+ * the gate's "did we already settle this payment?" memory was left in RAM: a
+ * restart dropped it, so a replayed proof was re-verified against a
+ * still-settled invoice and the paid tool ran a second time on one payment.
+ * Every other consumer in this repo (cvm-lambda, cvm-ppq, cvm-nanogpt,
+ * cvm-2fiat) already passes a `SqliteGateStore`; this was the lone outlier.
+ */
+export function buildGate(processor: PaymentProcessor, gateDb: string): ExplicitGate {
+  return new ExplicitGate(processor, new SqliteGateStore(gateDb));
 }
 
 async function main() {
@@ -91,7 +113,7 @@ async function main() {
     cfg.paymentMode === "cashu"
       ? new CashuProcessor({ mintUrl: cfg.cashuMintUrl })
       : (new FakeProcessorNone() as unknown as PaymentProcessor);
-  const gate = new ExplicitGate(processor);
+  const gate = buildGate(processor, cfg.gateDb);
   const client = new Sms4SatsClient({ baseUrl: cfg.sms4satsBase });
 
   const tools = buildSmsTools({

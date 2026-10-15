@@ -8,7 +8,8 @@
   "license": "MIT",
   "scripts": {
     "test": "bun test src services",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "gate-recovery": "bun src/gate-recovery-cli.ts"
   },
   "dependencies": {
     "@cashu/cashu-ts": "^4.11.0",

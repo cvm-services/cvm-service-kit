@@ -1,22 +1,12 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:@cashu/cashu-ts@^2.1.0": "2.9.0",
     "npm:@types/node@^22.9.0": "22.20.5",
     "npm:bun-types@latest": "1.4.2",
     "npm:nostr-tools@^2.10.4": "2.25.2_typescript@5.9.3",
     "npm:typescript@^5.6.3": "5.9.3"
   },
   "npm": {
-    "@cashu/cashu-ts@2.9.0": {
-      "integrity": "sha512-UesYcBkkJAGPbob2I/SX0aht4MQlfxUVPzI+NQqLKSg2l3m0EnmMznvnXZQnDZnhGy0Hd6rkgwAJTVOYcr0v/Q==",
-      "dependencies": [
-        "@noble/curves@2.0.1",
-        "@noble/hashes@2.0.1",
-        "@scure/bip32@1.7.0"
-      ],
-      "deprecated": true
-    },
     "@noble/ciphers@2.1.1": {
       "integrity": "sha512-bysYuiVfhxNJuldNXlFEitTVdNnYUc+XNJZd7Qm2a5j1vZHgY+fazadNFWFaMK/2vye0JVlxV3gHmC0WDfAOQw=="
     },
@@ -109,7 +99,7 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
-        "npm:@cashu/cashu-ts@^2.1.0",
+        "npm:@cashu/cashu-ts@^4.11.0",
         "npm:@types/node@^22.9.0",
         "npm:bun-types@latest",
         "npm:nostr-tools@^2.10.4",

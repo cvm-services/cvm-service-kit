@@ -37,4 +37,21 @@ describe("SqliteGateStore", () => {
   test("missing order returns undefined", () => {
     expect(mk().get("nope")).toBeUndefined();
   });
+
+  test("list([]) is an EMPTY filter, not 'no filter'", () => {
+    // `statuses` is documented as "all orders when omitted". An explicitly empty
+    // array is not omitted: it matches nothing. Treating `[]` as "no filter" made
+    // `list([])` return the whole table, which contradicts the documented
+    // contract and is a trap for any caller that filters a status list down to
+    // nothing (e.g. a config-driven set of statuses that came out empty).
+    const s = mk();
+    s.put({ orderId: "a", tool: "t", caller: "c", amountSats: 1, invoice: { ...invoice, orderId: "a" }, status: "settled", createdAt: 1, updatedAt: 1 });
+    expect(s.list([])).toEqual([]);
+    // The two documented shapes are unchanged.
+    expect(s.list("settled")).toHaveLength(1);
+    expect(s.list()).toHaveLength(1);
+    // And a multi-status filter still works.
+    expect(s.list(["settled", "refused"])).toHaveLength(1);
+    expect(s.list(["refused"])).toEqual([]);
+  });
 });

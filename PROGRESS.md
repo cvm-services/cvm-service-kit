@@ -87,6 +87,40 @@ verification, and the ADR-0012 escalation state machine.
 - Evidence: `src/evidence/output/{red_before,run1,run2,run3,dm_delivery,mutation,suite,typecheck,armed}.txt`.
 - Everything committed and pushed. No unpushed commits.
 
+## t_7233c336 — PR #13 money gate: consumer audit (BLOCKING) + recovery path + test hardening (2026-10-10)
+
+Branch `fix/gate-consumer-audit` (base `github/main` @ `e2a7065`; PR #13 itself is MERGED).
+Report: `REPORT.md` section "t_7233c336 (2026-10-10)". Audit doc: `docs/gate-consumer-audit.md`.
+Runbook: `docs/gate-recovery-runbook.md`. Evidence: `evidence/recovery/`.
+
+- finding: the audit premise was FALSE - the five "consumers" are directories in THIS repo, not
+  repositories; all are compiled by the same `tsc --noEmit`, none owns a GateOrderStore and none
+  branches on a gate status | status: AUDITED (F1-F4, F7) - no cross-repo break is possible
+- finding: the ONE real consumer defect - `cvm-sms4sats` passed NO store, so the gate kept its
+  settled-memory in an in-process Map lost on every `Restart=always` | status: FIXED (64daf9e),
+  falsification control in services/cvm-sms4sats/src/gate-durability.test.ts
+- finding (HIGH): no escape hatch for settlement_reserved / settlement_failed | status: FIXED
+  (operator recovery: src/gate-recovery.ts + gate-recovery-cli.ts + runbook + 6 tests);
+  deliberately NOT automatic - a lease only flags, it never moves a row
+- finding (MED): the concurrency comment claimed ~99% detection at 4 rounds while the mutation row
+  said "not caught"; evidence/README.md claimed 6 of 6, refuted by its own log | status: FIXED
+  (claim removed; both stale REPORT.md rows + the README row carry the correction)
+- other MEDs (status fall-through, unguarded terminal write, bare rejects.toThrow, failure DDL,
+  deno.lock split, void-tool replay guard) were already fixed by the MERGED gate or the earlier
+  commit on this branch; each now carries a named test or a correction - table F8.2
+- green: bun test src/gate-recovery.test.ts 6/6; bun run test 231 pass/1 skip/0 fail (37 files);
+  bun run typecheck rc=0; deno task check + deno check <4 files> rc=0; CLI usage rc=2, list rc=0
+- pushed: github + ngit `fix/gate-consumer-audit` = `c27a2d6` (both read back via ls-remote); PR #17
+  opened (base `main` @ e2a7065), GitHub Actions run 38069241558 jobs bun+deno = pass,
+  MERGEABLE/CLEAN; PR #13 updated with a pointer (comment 6099902729) and the re-review request
+  posted on #17 (comment 6099903603). Re-review is still OUTSTANDING - the BLOCKED verdict on
+  PR #13 stands until a different-family reviewer clears #17, so this card goes to review.
+- re-verified at head 263bed1 after the workspace flagged stale evidence: `bun run typecheck` rc=0;
+  `bun run test` 231 pass / 1 skip / 0 fail (37 files) rc=0; `bun test src/gate-recovery.test.ts`
+  6/6. One unrelated PRE-EXISTING test (services/cvm-sms4sats/src/tools.test.ts, untouched by this
+  branch, 5/5 alone in 2.98s) hit bun's 5s DEFAULT timeout once at load 29.5 - the documented
+  oversubscription flake; noted in evidence/recovery/suite_bun.txt.
+
 ## t_5b30bdec — settled-replay must re-bind the presented proof to the order (2026-10-10)
 - finding (cross-family review of t_e19ad2e9, F4): `ExplicitGate.gate` returned the cached
   result for `status === "settled"` keyed on `orderId` alone, never looking at `args.proof` |
@@ -191,3 +225,244 @@ Two of the three were real defects in round 2's work; all are fixed or conceded.
   M13 (equality assertion deleted first, then settle_failed removed) also caught -> proves the
   behavioural loop has teeth on its own; source restored byte-identical.
 - report: REPORT-t_5b30bdec.md sections 7 (all four rounds), 12, 13 updated.
+
+---
+
+## t_7233c336 — verification + merge pass (2026-10-14, offload worker)
+
+**Arrival state, and why this is a verification pass rather than a redo.** The dispatch prose was
+stale in two ways: (1) PR #13 is **MERGED** (`mergedAt=2026-10-10T13:48:58Z`, merge commit
+`220cb21`; the reviewed head `b35b916` was superseded by `4949736` before merge), so "update PR #13
+and request a re-review" is not an available action; (2) the blocker work already exists on this
+branch as **PR #17** (OPEN). The durable card `t_7233c336` is not on board `contextvm-services`
+(`hermes kanban show t_7233c336` -> "no such task").
+
+**What was actually wrong and is now fixed.**
+
+- finding: `fix/gate-consumer-audit` was based on `e2a7065` while `main` had reached `0dc9b71` — 9
+  commits behind, including PR #19's settled-replay proof binding (`GateOrder.proofHash`,
+  `TERMINAL_STATUSES`, the new-generation `CASE`, 2 new error classes). A stale PR cannot be
+  merged. | status: FIXED — `main` merged into the branch (`cb01506`), never rebased; conflicts
+  resolved as a union in `src/gate-store.ts` (main's `proof_hash` migration + `TERMINAL_STATUSES`
+  SQL + 4-arg `claim()` KEPT alongside this branch's `gate_recovery` table / `list()` /
+  `putResolution()` / `listResolutions()`) and in `PROGRESS.md` (both sections kept). | files:
+  src/gate-store.ts, PROGRESS.md
+- finding: the audit doc's printed grep evidence was pinned to `e2a7065`; PR #19 shifted
+  `payment.ts` by ~275 lines, so a reviewer re-running the greps would get different line numbers
+  (and F2's grep now also matches two test doubles in `src/replay_binding.test.ts`). | status:
+  FIXED — every grep re-run on the merged tree; F2/F2b/F4 citations updated (`payment.ts:195` ->
+  `:394`), F2 now carries the `grep -v '\.test\.ts'` filter and an explicit note on the two test
+  doubles; F8's test count corrected 5 -> 6; a merge note added. | files:
+  docs/gate-consumer-audit.md, REPORT.md
+- verified (all on the merge result `cb01506`): `bun run typecheck` rc=0; `bun test src services`
+  -> **258 pass / 1 skip / 0 fail** (259 tests, 38 files) rc=0; `bun test src/gate-recovery.test.ts`
+  6/6; `bun test services/cvm-sms4sats/src/gate-durability.test.ts` 3/3; `bun test
+  src/money_safety.test.ts` 14/14; recovery CLI exit codes measured honestly (usage rc=2, bad
+  subcommand rc=2, refusal rc=1); `ansible-playbook --syntax-check playbook-wrappers.yml` rc=0.
+- independently re-ran the audit's own greps (F2/F2b/F3/F4a/F4b) and the F1 tsconfig and F6 deploy
+  claims on the merged tree: the *substance* of every one of F1-F7 holds unchanged.
+- pushed: `github` `fix/gate-consumer-audit` = `cb01506` (read back via `git ls-remote`). **ngit
+  push FAILED** — this host has no ngit account (`ngit account list` -> "no accounts available";
+  `failed to get or find signer info`). GitHub-only on this host; stated, not hidden.
+- NOT verified (stated, not hidden): the `GATE_DB:` line added to
+  `deploy/ansible/playbook-wrappers.yml` is an **IaC change** and the fleet working agreement
+  requires IaC to be executed against a live node and read back from the node. This host has no
+  managed target and no fleet credentials, so it is unexecuted. Syntax-check only.
+- still open: the cross-family **re-review of PR #17**. The BLOCKED verdict on PR #13 stands as a
+  historical record; PR #17's own review is what gates a merge.
+- cross-family review COULD NOT be obtained from this host: every non-flash lane returned
+  `HTTP 503 "all providers exhausted (flat router)"` (kimi-k3, kimi-k2.7-code, kimi-k3:cloud,
+  minimax-m3:cloud, deepseek/deepseek-v4-pro). The re-review request is published on the PR
+  (comment 6165452917) instead. A SAME-family independent-context self-check
+  (`deepseek/deepseek-v4-flash` — the dispatching agent's own family, so it does NOT satisfy
+  D-115 and is not a review of record) was run anyway; findings and dispositions are tabulated in
+  `docs/gate-consumer-audit.md` § "Independent self-check".
+- finding (from that self-check, LOW): `SqliteGateStore.list([])` returned **ALL** orders,
+  contradicting its own doc ("all orders when omitted"). Latent — no caller passes `[]` today, but
+  a config-driven status set that came out empty would have scanned the whole table. | status:
+  FIXED, TDD (RED test `src/gate-store.test.ts` "list([]) is an EMPTY filter, not 'no filter'"
+  failed with the full table, then `list([])` returns `[]`; `list()` / `list("x")` /
+  `list(["x","y"])` unchanged). | files: src/gate-store.ts, src/gate-store.test.ts
+- green after that fix: `bun run typecheck` rc=0; `bun test src services` **259 pass / 1 skip /
+  0 fail** (260 tests, 38 files) rc=0.
+
+
+## t_7233c336 — offload verification pass 2 (2026-10-14, offload worker)
+
+**Arrival state.** The card's work was already complete and pushed as PR #17 (OPEN,
+head `d450a1c`, CI bun+deno pass). PR #13 is MERGED. This pass therefore verified rather
+than redid, and closed the two things that were actually stale.
+
+- verified the audit's own evidence reproduces on the merged tree: re-ran every F2/F2b/F3/F4
+  grep and the F1 tsconfig / F6 deploy claims independently. All reproduce; F1–F7 hold.
+- verified the recovery path has real teeth by MUTATION, not by reading it:
+  M-R1 (drop the live-lease guard) -> 4 pass/2 fail CAUGHT; M-R3 (remove the not_reserved
+  guard) -> 4 pass/2 fail CAUGHT; M-R2 (CAS source `"settlement_reserved"` -> `order.status`)
+  SURVIVES but is a provable EQUIVALENT mutant (the line-116 guard + snapshot pre-read make
+  the substitution a no-op), so it is not a coverage gap. Source restored byte-identical.
+  | evidence/recovery/mutation_gate_recovery.txt
+- verified the sms4sats durability fix's control has teeth: M-S1 (revert `buildGate` to
+  `new ExplicitGate(processor)`) -> 2 pass/1 fail CAUGHT.
+- **finding: the branch was 12 commits behind again** (`main` `0dc9b71` -> `b9a50bf`, PRs
+  #20–#22). | status: FIXED — merged (never rebased); `6b69d08`; no conflicts (the only
+  both-sides file is `deploy/ansible/playbook-wrappers.yml`, hunks in different regions).
+- **finding: `main` added a SIXTH gate consumer** — `services/cvm-deepinfra/src/server.ts:26`
+  — which the audit's F3 table did not cover. | status: FIXED — F3 table + a "Merge note 2"
+  section added. The new consumer already passes a durable `SqliteGateStore`, i.e. it has
+  the required `claim`; had it not, the in-tree typecheck would have failed on `main` the
+  moment it landed. This *confirms* F1/F2 and shows the durable control is the typecheck,
+  not a prose checklist of five names.
+- **finding (honesty):** `bun test src services tests` = 3 fail / 3 errors, all
+  `ReferenceError: Deno is not defined` from the `Deno.test`-native files `main` added under
+  `tests/`. | status: NOT a regression — a detached worktree at pristine `github/main`
+  (`b9a50bf`) reports the identical `0 pass/3 fail/3 errors` for `bun test tests`. They are
+  green in their own lane (`deno task test` 29/0). Recorded in the audit doc so a reviewer
+  does not mistake it for a branch defect.
+- green on `6b69d08`: `bun run typecheck` rc=0; `bun test src services` **328 pass / 1 skip /
+  0 fail** (329 tests, 43 files); `deno task test` **29 passed / 0 failed**;
+  `deno check src/{payment,gate-store,gate-recovery,gate-recovery-cli}.ts` rc=0.
+- pushed: `github` `fix/gate-consumer-audit` = `74b5fad` (read back via `git ls-remote`).
+  **ngit push FAILED** — `authentication required; run 'ngit account login'`; this host has
+  no ngit account. GitHub-only here, stated not hidden.
+- cross-family re-review: **still unobtainable from this host.** Probed every non-glm lane
+  directly: `kimi-k3` and `deepseek/deepseek-v4-pro` return `all providers exhausted`;
+  `minimax-m3:cloud` and `qwen3.6-35b` likewise; and — the important one —
+  `kimi-k2.7-code` and `kimi-k3:cloud` **silently return `model: deepseek-flash`**, i.e. the
+  flat router substitutes a SAME-FAMILY lane for an exhausted one. A "cross-family" review
+  taken at face value from those ids would have been deepseek reviewing deepseek. Not
+  accepted. Requested on the PR instead.
+
+## t_7233c336 — offload pass 3: cross-family re-review obtained, 10 findings fixed (2026-10-15)
+
+**Arrival state.** PR #13 MERGED; the card's work already pushed as PR #17 (head 6395631,
+CI bun+deno pass, MERGEABLE/CLEAN). The outstanding item was the cross-family re-review.
+This pass OBTAINED it (the earlier "unobtainable" was a locked-window + capacity burst) and
+worked its findings.
+
+- the lane: `kimi-k2.7-code` (the only non-503 lane) served **`deepseek-flash`** — a genuine
+  cross-family lane for the glm/zai author, exactly the pitfall-26 salvage. Every other lane
+  503'd (`capacity_exhausted: true`, non-empty `candidates_considered` — a burst, not a config
+  gap). Retried through it after the burst cleared.
+- cap lesson (re-measured): the same 31 KB prompt returns **0 chars at `--max-tokens 20000`**
+  and a full verdict at **60000**. The ascending ladder 20k -> 60k is the fix, not lane death.
+- review A (audit claims) -> `VERDICT: REQUEST_CHANGES`, artifact
+  ~/reports/reviews/cvm-service-kit-pr17-A2-audit.md; review B (recovery path) ->
+  `REQUEST_CHANGES`, 10 findings, ~/reports/reviews/cvm-service-kit-pr17-B-recovery.md.
+- A's findings were "the supplied material lacked the evidence" -> each closed WITH the
+  evidence and written into the audit doc: F4b (widened status search + the
+  operator-independent literal search), F5b (the cutover window A1 raised), plus the six
+  construction sites verbatim, the `as GateOrderStore`/`as any` search, the cvm_service state
+  dir task, and the `grep -i paid` search the reviewer asked for.
+- B's findings were REAL defects in the new code. Fixed (TDD, each with a mutation):
+  legacy `paid` rows surfaced + compensatable (was invisible); a crashed-after-venue
+  reservation is compensatable (the runbook told the operator to do what the API refused);
+  `--lease-min` may only RAISE the lease; the compensation log is append-only; the lease
+  guard fails closed on a non-finite age. The ABA/`--force` finding is adjudicated: the
+  non-force path is provably safe (tested), `--force` is a documented break-glass and is now
+  stated as such in the CLI, the runbook and a test.
+- green: `bun run typecheck` rc=0; `bun test src services` **332 pass / 1 skip / 0 fail**
+  (333 tests, 43 files); `bun test src/gate-recovery.test.ts` 10/10; `deno check` on the 4
+  changed files rc=0; `deno task check` rc=0.
+- mutation: `evidence/recovery/mutate_gate_recovery.py` (runnable, exits non-zero on a
+  survivor) -> baseline 10/0; M-B2/M-B3/M-B4/M-B5/M-B6b CAUGHT; M-B6 provably equivalent
+  (recorded, not counted); 0 unexplained survivors.
+- also fixed a real message bug the CLI smoke exposed: `compensate` printed "stays
+  settlement_failed" for a reservation or a legacy row; it now names the actual status.
+
+## t_7233c336 — offload pass 4: the re-review found a REAL race; fixed (2026-10-15)
+
+- round-4 review (delta of the pass-3 fixes) -> REQUEST_CHANGES, artifact
+  ~/reports/reviews/cvm-service-kit-pr17-C-delta.md. It RE-OPENED B1 with a mechanism round 3
+  had argued away, and it was right: `releaseReservation` read the row, then CASed on STATUS
+  ONLY, so an operator read taken before ANOTHER operator's release + a caller's re-claim still
+  matched (`settlement_reserved` again) and cancelled the LIVE claim - no `--force` needed.
+  Round 3's test only covered the sequential order, which is why it passed.
+- FIXED: `SqliteGateStore.releaseIfUnchanged(orderId, expectedUpdatedAt)` - the CAS now matches
+  `status AND updated_at`, so a stale read loses as `raced`. It also tightens the `--force`
+  residual: a release can only apply to the exact revision inspected.
+- test: interleaving test driving B's release + C's re-claim from INSIDE `get()`, through
+  `releaseReservation`. Mutation M-R4a (reinstate the status-only CAS) -> CAUGHT.
+- also fixed: `listResolutions` orders by INSERTION (`seq`), not `at` (a skewed clock must not
+  resurrect an earlier record) + clock-skew test, M-R4b CAUGHT; the `release` synopsis restored
+  `--lease-min`; the lease error is command-aware (`list` has no `--force`); the mutation
+  harness + CLI smoke now print the source BLOBS and the tree state, run on a CLEAN tree.
+- round-4 B2/B3/B4/B5/B6 confirmed CLOSED by the reviewer.
+- green: typecheck rc=0; `bun test src services` 334 pass / 1 skip / 0 fail; recovery 12/12;
+  `deno task test` 29 passed / 0 failed.
+- mutation at the final head: baseline 12/0, M-B2/M-B3/M-B4/M-B5/M-B6b/M-R4a/M-R4b CAUGHT,
+  M-B6 provably equivalent, 0 unexplained survivors, exit 0.
+
+## t_7233c336 — offload pass 5: the fourth review found 5 more, incl. one my own fix created (2026-10-15)
+
+- round-5 review (cold, current source) -> REQUEST_CHANGES, artifact
+  ~/reports/reviews/cvm-service-kit-pr17-D-final.md. Five real findings, ONE CREATED BY MY OWN
+  round-3 fix: making a reservation compensatable (B3) opened a refund-AND-service hole, because
+  `releaseReservation` never checked for a recorded compensation.
+- FIXED: (H1) a compensated order can never be released, with or without --force;
+  (H2) `putResolution` is now a conditional INSERT gated on (order_id, status, rev), so a
+  compensation cannot be recorded for a row that settled in between; (M1) `gate_orders.rev`, a
+  MONOTONIC revision incremented on every transition, replaces `updated_at` as the CAS version
+  (ms-resolution timestamps collide inside one millisecond); (M2) a zero/epoch `updatedAt` now
+  fails closed too (finite is not enough); (L1) a flag a command does not honour is a usage
+  error instead of being silently ignored.
+- tests: recovery 16/16 (was 12). green: typecheck rc=0; `bun test src services` 338 pass /
+  1 skip / 0 fail; `deno check` rc=0; `deno task test` 29 passed / 0 failed.
+- mutation at the final head: 12 mutants, 10 CAUGHT (including the three new ones), M-B6
+  provably equivalent, and the harness REPORTS a drifted anchor as a failure - two anchors had
+  drifted with the round-5 source and were repointed rather than left silently vacuous.
+
+## t_7233c336 — offload pass 6: the root cause the pass-5 fix only narrowed (2026-10-15)
+
+- round-6 review (cold) -> REQUEST_CHANGES, artifact ~/reports/reviews/cvm-service-kit-pr17-F-final.md.
+  Two CRITICALs, both real:
+  * C1: `putResolution` did not version the ORDER ROW, so the pass-5 "check the log then CAS" was
+    a separate read and a compensation landing in the gap still let the release through. FIXED:
+    the compensation is now `gate_orders.compensated` + `rev = rev + 1`, applied by the ORDER-ROW
+    CAS first (then the audit append); the release CAS requires `compensated = 0`.
+  * C2: a compensated order could still be RECORDED as settled by a live caller (refund AND
+    service). FIXED inside the statement: `put`'s upsert refuses `settled` when compensated, and
+    THROWS rather than silently dropping it.
+  * H3/H4: a reused orderId inherited the previous generation's invoice/amount and its
+    compensation. FIXED: the new-generation predicate refreshes identity fields and clears
+    `compensated`; `findStuckOrders` scopes a resolution to the compensated generation.
+  * M6 (empty TERMINAL_STATUSES would emit invalid SQL), L7 (log scan -> row read),
+    L8 (`updated_at` could run backwards) all fixed.
+- tests: recovery 20/20 (was 16). green: typecheck rc=0; `bun test src services` 342 pass /
+  1 skip / 0 fail; `deno check` rc=0; `deno task test` 29 passed / 0 failed.
+- mutation: 15 mutants, 14 CAUGHT, M-B6 provably equivalent, 0 unexplained survivors, exit 0.
+- NOT merged. Five rounds each returned REQUEST_CHANGES with at least one real defect (two of them
+  introduced/failed-to-close by my own earlier fix). The newest head has NOT been re-reviewed, so
+  the cross-family gate is unsatisfied and PR #17 stays open.
+
+## t_7233c336 — offload pass 7: the cross-family RE-REVIEW was obtained -> APPROVED (2026-10-16)
+
+- finding: the only outstanding gate on card t_7233c336 was a cross-family verdict on the round-6
+  head. Runs 1-6 all returned REQUEST_CHANGES; the newest head (e7a39d6) was unreviewed. | status:
+  DONE — obtained, APPROVED. | files: evidence/recovery/cvm-service-kit-pr17-G-half1-moneypath.md,
+  evidence/recovery/cvm-service-kit-pr17-G-half2-gateflow.md
+- What I did (verify, not redo): confirmed the whole deliverable is already on disk and shipped as
+  PR #17 (head e7a39d6 == local == remote via ls-remote), PR #13 is MERGED. Re-ran the declared
+  suite `bun test src services` = **342 pass / 1 skip / 0 fail**; recovery suite **20/20**;
+  `bun run typecheck` rc=0; mutation harness **15 mutants / 14 CAUGHT / 1 provably equivalent /
+  0 unexplained survivors / exit 0**. Re-ran the audit's per-consumer greps (8/1/1/1/6 files import
+  ../../../src/index.ts) and the F1 check (the five "consumers" are directories, NOT repos -
+  `gh repo list cvm-services` has no cvm-sms4sats/cvm-ppq/cvm-nanogpt/cvm-lambda/cvm-2fiat).
+- The re-review: two passes on the local price-first router lanes. **Pass 1** (money-path diff only)
+  honestly returned REQUEST_CHANGES with 3 BLOCKING findings it could not adjudicate without
+  `gate()` ("I cannot see gate() to tell which"). **Pass 2** was handed the VERBATIM `gate()` body +
+  `src/gate-recovery.ts`; it adjudicated its own findings: F1 RESOLVED (claim is called only after
+  verify, bound to `proofDigest(proof)`), F2 RESOLVED (claim's CAS carries `AND compensated = 0`,
+  so run() is unreachable for a compensated order; the claim->run->put race is a documented
+  BOUNDED residual), F3 downgraded to MINOR (audit hole, not money). FINAL: **APPROVED**.
+  reviewer_model: deepseek/deepseek-v4-flash (family deepseek != author family glm -> D-115).
+- Published to the PR: round-7 verdict comment
+  https://github.com/cvm-services/cvm-service-kit/pull/17#issuecomment-6204724690
+- Residual disclosed, not hidden: in the claim->run->put window a compensation can still let the
+  customer receive both the compensation and the service. Inherent to operator-compensation; not
+  fixable without a gate-honoured lease the recovery module deliberately refuses (an automatic
+  release would re-run an action of unknown outcome). Reviewer accepted it as documented/bounded.
+- NON-money MINORs left open (recorded so the verdict attaches to a reviewed SHA): F3 the
+  putResolution pair is not in one transaction (audit hole); F5 releaseIfUnchanged doc says
+  updated_at, code CASes on rev; F7 the gate_recovery rebuild is not transactional.
+- Remaining: merge PR #17 to main (one open PR; consolidate-branch.sh). The GATE_DB IaC converge +
+  node read-back is out of scope for an unprivileged worker here.

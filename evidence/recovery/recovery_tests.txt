@@ -1,0 +1,16 @@
+$ bun test src/gate-recovery.test.ts
+bun test v1.4.2 (744846f84)
+
+src/gate-recovery.test.ts:
+(pass) gate recovery: inspecting stuck orders > a crashed reservation is surfaced, and inspecting it changes nothing [2296.08ms]
+(pass) gate recovery: releasing a reservation > a live lease is refused, and clearing it enables exactly one real retry [5878.75ms]
+(pass) gate recovery: releasing a reservation > release goes through the CAS: an already-moved row is never re-released [839.98ms]
+(pass) gate recovery: releasing a reservation > release can never resurrect a terminal order [700.56ms]
+(pass) gate recovery: compensating a terminal failure > a compensation is recorded durably and does NOT license a retry [1388.06ms]
+(pass) gate recovery: the operator command > list reports, release refuses a live lease then honours --force [887.69ms]
+
+ 6 pass
+ 0 fail
+ 60 expect() calls
+Ran 6 tests across 1 file. [12.20s]
+rc=0

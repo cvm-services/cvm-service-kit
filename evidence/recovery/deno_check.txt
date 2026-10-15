@@ -1,0 +1,11 @@
+$ deno task check
+[0m[32mTask[0m [0m[36mcheck[0m deno check src/mod.ts
+[0m[32mCheck[0m src/mod.ts
+deno task check rc=0
+
+$ deno check src/gate-recovery.ts src/gate-recovery-cli.ts src/gate-store.ts src/payment.ts
+[0m[32mCheck[0m src/gate-recovery.ts
+[0m[32mCheck[0m src/gate-recovery-cli.ts
+[0m[32mCheck[0m src/gate-store.ts
+[0m[32mCheck[0m src/payment.ts
+rc=0

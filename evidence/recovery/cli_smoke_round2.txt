@@ -1,0 +1,47 @@
+# gate-recovery CLI smoke
+# HEAD: 6deb31d5f90078cdafddc94d4da54cb9b4db79e6
+# working tree: clean (excluding this transcript)
+# source blobs:
+#   cadc02d5092a867b919cb89e5f679a23fe666e8f  src/gate-recovery.ts
+#   1e4afb28372d05c4810c3c9fc4300950be4c4f0c  src/gate-recovery-cli.ts
+#   7fa9dfe050521af231b5fdf042a2265b73b4da00  src/gate-store.ts
+#   090cef154e6d4be19c8813edee6d57298b357ff0  src/gate-recovery.test.ts
+
+$ bun src/gate-recovery-cli.ts list --db /home/c08r4d0r/.cache/hermes/tmp/tmp.7HxRu38j7p/gate.sqlite
+reserved res1 age=0.0min lease live sats=1200 tool=tool:place_order
+legacy-paid legacy1 age=29867898.0min LEASE EXPIRED sats=1000 tool=tool:place_order
+1 legacy 'paid' row(s): the gate set 'paid' BEFORE running the action, so the outcome is unverifiable and the row can never be re-driven or released. Compensate (refund/abandon) and close the incident with that record.
+1 reservation(s) still live. Do NOT release a live one: a slow action and a crashed one look the same here. Check the downstream venue first.
+rc=0
+
+$ bun src/gate-recovery-cli.ts release --db /home/c08r4d0r/.cache/hermes/tmp/tmp.7HxRu38j7p/gate.sqlite --order res1
+refused: res1 is only 0.0min into a 15.0min lease; it may still be running. Re-run with --force only after checking the venue never received the action.
+rc=1
+
+$ bun src/gate-recovery-cli.ts release --db "$DB" --order res1 --lease-min 0.001
+usage error: --lease-min may not be lower than the 15-minute default; use --force if you have checked the venue (the two are the same act, and --force is the honest one)
+rc=2 (the guard may only be RAISED; use --force for the explicit override)
+
+$ bun src/gate-recovery-cli.ts compensate --db /home/c08r4d0r/.cache/hermes/tmp/tmp.7HxRu38j7p/gate.sqlite --order res1 --outcome refunded --note venue confirms delivered
+recorded refunded for res1. The order stays settlement_reserved on purpose: it still refuses to re-run.
+rc=0
+
+$ bun src/gate-recovery-cli.ts compensate --db /home/c08r4d0r/.cache/hermes/tmp/tmp.7HxRu38j7p/gate.sqlite --order legacy1 --outcome refunded --note pre-2026-10-09, unverifiable
+recorded refunded for legacy1. The order stays paid on purpose: it still refuses to re-run.
+rc=0
+
+$ bun src/gate-recovery-cli.ts compensate --db /home/c08r4d0r/.cache/hermes/tmp/tmp.7HxRu38j7p/gate.sqlite --order set1 --outcome refunded --note x
+refused: set1 is settled, which is not compensatable (only settlement_failed, settlement_reserved and legacy paid are)
+rc=1
+
+$ bun src/gate-recovery-cli.ts nonsense --db "$DB"
+usage error: unknown command nonsense
+rc=2
+
+$ bun src/gate-recovery-cli.ts list --db /home/c08r4d0r/.cache/hermes/tmp/tmp.7HxRu38j7p/gate.sqlite
+reserved res1 age=0.0min lease live sats=1200 tool=tool:place_order compensated=refunded
+legacy-paid legacy1 age=29867898.0min LEASE EXPIRED sats=1000 tool=tool:place_order compensated=refunded
+1 legacy 'paid' row(s): the gate set 'paid' BEFORE running the action, so the outcome is unverifiable and the row can never be re-driven or released. Compensate (refund/abandon) and close the incident with that record.
+1 reservation(s) still live. Do NOT release a live one: a slow action and a crashed one look the same here. Check the downstream venue first.
+rc=0
+

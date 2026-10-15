@@ -58,6 +58,7 @@
           MIN_PRICE_SATS: "1"
           TREASURY_FLOOR_SATS: "1000"
           ORDER_DB: /var/lib/loom/cvm-sms4sats/orders.sqlite
+          GATE_DB: /var/lib/loom/cvm-sms4sats/gate.sqlite
           CASHU_WALLET_DB: /var/lib/loom/cvm-sms4sats/cashu.sqlite
           HEALTH_PORT: "8781"
       - name: cvm-nanogpt

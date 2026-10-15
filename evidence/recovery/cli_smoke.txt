@@ -1,0 +1,17 @@
+$ bun src/gate-recovery-cli.ts   # no args -> usage, rc 2
+gate-recovery - operator escape hatch for orders the gate will not retry
+
+  list       --db <gate.sqlite> [--lease-min N]
+  release    --db <gate.sqlite> --order <id> [--lease-min N] [--force]
+  compensate --db <gate.sqlite> --order <id> --outcome refunded|abandoned --note <why>
+
+  release   moves a crashed 'settlement_reserved' order back to awaiting_payment
+            so a retry can re-drive it. It refuses while the lease is live
+            unless --force is given: check the downstream venue FIRST.
+  compensate records an operator compensation for a 'settlement_failed' order.
+            It never changes the status, so the order still refuses to re-run.
+rc=2
+
+$ bun src/gate-recovery-cli.ts list --db /home/c03rad0r/.tmp/tmp.pGL3xzMgko/gate.sqlite
+no stuck orders
+rc=0
