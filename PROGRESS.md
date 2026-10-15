@@ -368,3 +368,26 @@ worked its findings.
   (recorded, not counted); 0 unexplained survivors.
 - also fixed a real message bug the CLI smoke exposed: `compensate` printed "stays
   settlement_failed" for a reservation or a legacy row; it now names the actual status.
+
+## t_7233c336 — offload pass 4: the re-review found a REAL race; fixed (2026-10-15)
+
+- round-4 review (delta of the pass-3 fixes) -> REQUEST_CHANGES, artifact
+  ~/reports/reviews/cvm-service-kit-pr17-C-delta.md. It RE-OPENED B1 with a mechanism round 3
+  had argued away, and it was right: `releaseReservation` read the row, then CASed on STATUS
+  ONLY, so an operator read taken before ANOTHER operator's release + a caller's re-claim still
+  matched (`settlement_reserved` again) and cancelled the LIVE claim - no `--force` needed.
+  Round 3's test only covered the sequential order, which is why it passed.
+- FIXED: `SqliteGateStore.releaseIfUnchanged(orderId, expectedUpdatedAt)` - the CAS now matches
+  `status AND updated_at`, so a stale read loses as `raced`. It also tightens the `--force`
+  residual: a release can only apply to the exact revision inspected.
+- test: interleaving test driving B's release + C's re-claim from INSIDE `get()`, through
+  `releaseReservation`. Mutation M-R4a (reinstate the status-only CAS) -> CAUGHT.
+- also fixed: `listResolutions` orders by INSERTION (`seq`), not `at` (a skewed clock must not
+  resurrect an earlier record) + clock-skew test, M-R4b CAUGHT; the `release` synopsis restored
+  `--lease-min`; the lease error is command-aware (`list` has no `--force`); the mutation
+  harness + CLI smoke now print the source BLOBS and the tree state, run on a CLEAN tree.
+- round-4 B2/B3/B4/B5/B6 confirmed CLOSED by the reviewer.
+- green: typecheck rc=0; `bun test src services` 334 pass / 1 skip / 0 fail; recovery 12/12;
+  `deno task test` 29 passed / 0 failed.
+- mutation at the final head: baseline 12/0, M-B2/M-B3/M-B4/M-B5/M-B6b/M-R4a/M-R4b CAUGHT,
+  M-B6 provably equivalent, 0 unexplained survivors, exit 0.

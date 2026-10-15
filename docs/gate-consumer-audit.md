@@ -697,6 +697,65 @@ check the CLI's parsing, the `--lease-min` clamp, or the test bodies. That is a 
 omission on my side (the round-2 prompt inlined its material), and the CLI source and test
 file are supplied in the next round's material. Recorded here rather than silently fixed.
 
+## Round-4 cross-family review (2026-10-15) — B1 was NOT closed; the fix, and the second-order fixes
+
+Third review this round, of the round-3 fixes (delta only). Artifact:
+`~/reports/reviews/cvm-service-kit-pr17-C-delta.md` (`VERDICT: REQUEST_CHANGES`).
+**It found a real bug that round 3's fix did not close, and it was right about the mechanism.**
+This is the finding that justified the whole re-review loop.
+
+### The real one: `releaseReservation` had a stale-read TOCTOU (B1, re-opened)
+
+Round 3 argued "without `--force` the ABA cannot happen, because each CLI run re-reads the
+row". That argument only covers the case where the second operator's read happens *after* the
+re-claim. The round-4 review described the case it misses, and it is real:
+
+1. Operator A calls `releaseReservation`; it does `store.get(orderId)` and sees
+   `settlement_reserved` with an **expired** lease, so the lease check passes.
+2. **Before A's CAS executes**, operator B releases the row (`awaiting_payment`) and a retry
+   caller C re-claims it (`settlement_reserved`, **fresh** `updated_at`).
+3. A's CAS runs. It was a **status-only** compare-and-set
+   (`WHERE order_id = ? AND status = ?`), and the status is `settlement_reserved` again — so
+   it **matches**, releasing C's live claim. A second caller can then claim and run the action
+   concurrently with C.
+
+The read and the CAS are not one atomic step, and a status is not a version. Round 3's test
+only covered the sequential case, which is why it passed.
+
+**Fixed** with a version-predicated CAS: `SqliteGateStore.releaseIfUnchanged(orderId,
+expectedUpdatedAt)` matches `status = 'settlement_reserved' AND updated_at = ?`. `updated_at`
+is written by every transition, so a stale read now loses as `raced` instead of stealing the
+new owner's lease. This also tightens the `--force` residual: a release can only ever apply to
+the exact revision the operator inspected.
+
+**Test** (the reviewer's own falsifier): an interleaving test drives the sequence *through*
+`releaseReservation` — a delegating store performs B's release and C's re-claim from inside
+`get()`, so A's CAS lands on a row that moved away and back. Asserts `refused: "raced"` and
+that C's claim survives. **Mutation M-R4a** (reinstate the status-only CAS) → **CAUGHT**.
+
+### The second-order findings from round 4
+
+| finding | disposition |
+| --- | --- |
+| B7 "only partially closed: no interleaving coverage" | closed by the M-R4a mutation above — the harness now pins the race, not just the sequential path |
+| B8 evidence said `HEAD: ff4e25a`, `working tree: DIRTY`, not the reviewed head | **fixed and made structural**: the harness now records the tree state at run time (and is run on a clean tree) **and pins the four source files by `git hash-object`** — so the evidence is tied to the mutated *content*, not to a commit that a later docs-only commit moves |
+| LOW `--lease-min` missing from the `release` synopsis although it is parsed | fixed: synopsis restored |
+| LOW the `--lease-min` error named `--force` even for `list`, which has no `--force` | fixed: the message is command-aware |
+| LOW the append-only log's "current" record was chosen by `at`, so a skewed clock could resurrect an earlier entry | fixed: `listResolutions` orders by insertion (`seq`), not `at`; new clock-skew test; **mutation M-R4b → CAUGHT** |
+
+The reviewer confirmed **B2, B3, B4, B5, B6 closed** at round 4.
+
+### Evidence hygiene (this round)
+
+Both transcripts are now reproducible scripts run on a **clean** tree at the recorded head, and
+both print the source blob hashes:
+
+- `evidence/recovery/mutate_gate_recovery.py` → `mutation_gate_recovery_round2.txt`
+  (baseline 12/0; **M-B2, M-B3, M-B4, M-B5, M-B6b, M-R4a, M-R4b CAUGHT**; M-B6 provably
+  equivalent; **0 unexplained survivors**; exits non-zero if that ever changes)
+- `evidence/recovery/cli_smoke.sh` → `cli_smoke_round2.txt` (prints the literal HEAD and the
+  source blobs; each exclusion of its own transcript from the dirty check is stated in-line)
+
 ## Independent self-check (SAME family — explicitly NOT a D-115 review)
 
 Every non-flash model lane was capacity-exhausted on this host when the pass ran —
