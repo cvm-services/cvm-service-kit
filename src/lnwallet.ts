@@ -1,5 +1,6 @@
 import { finalizeEvent, nip04, nip44, type Event } from "nostr-tools";
 import { Relay } from "nostr-tools/relay";
+import { NwcErrorReply, NwcTimeout, describeNwcFailure } from "./nwc_errors.ts";
 
 export interface MintedInvoice {
   bolt11: string;
@@ -89,6 +90,7 @@ export class NwcLnWallet implements LnWallet {
   private readonly encryption: "nip04" | "nip44";
   private relay?: Relay;
   private readonly timeoutMs: number;
+  private lastDecryptScheme: "nip04" | "nip44" | "none" = "none";
 
   constructor(nwcUrl: string, opts: { timeoutMs?: number } = {}) {
     const u = new URL(nwcUrl.replace(/^nostr\+walletconnect:\/\//, "https://"));
@@ -139,29 +141,63 @@ export class NwcLnWallet implements LnWallet {
       this.secret,
     );
 
+    let eventsSeen = 0;
+
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         sub.close();
-        reject(new Error(`NWC ${method} timed out`));
+        const err = new NwcTimeout(method, eventsSeen === 0 ? "no-reply" : "reply-not-usable");
+        // Attach the diagnostic so the message distinguishes silence from an
+        // undecryptable reply, and warns about retry safety on spending methods.
+        err.message = describeNwcFailure(err, { eventsSeen, decryptScheme: this.lastDecryptScheme });
+        reject(err);
       }, this.timeoutMs);
       const sub = relay.subscribe([{ kinds: [23195], authors: [this.walletPubkey], limit: 0 }], {
         onevent: async (event: any) => {
           const eTag = event.tags?.find((t: string[]) => t[0] === "e");
           if (eTag && eTag[1] !== reqEvent.id) return;
+          // Count every candidate reply BEFORE trying to read it, so "no reply" is
+          // distinguishable from "a reply we could not read". The previous version
+          // swallowed undecryptable events silently, which made a real answer look
+          // exactly like silence and cost a debugging session.
+          eventsSeen += 1;
+          let plain: string | null = null;
+          let scheme: "nip04" | "nip44" | "none" = "none";
+          // Try the declared scheme, then the other one. A wallet that answers with a
+          // different scheme is still answering.
           try {
-            const plain = await this.decrypt(event.content);
-            const msg = JSON.parse(plain);
-            if (msg.error) {
-              clearTimeout(timer);
-              sub.close();
-              reject(new Error(`NWC error: ${msg.error?.message ?? JSON.stringify(msg.error)}`));
-              return;
+            plain = this.encryption === "nip04"
+              ? nip04.decrypt(this.secret, this.walletPubkey, event.content)
+              : nip44.v2.decrypt(event.content, nip44.v2.utils.getConversationKey(this.secret, this.walletPubkey));
+            scheme = this.encryption;
+          } catch {
+            try {
+              plain = this.encryption === "nip04"
+                ? nip44.v2.decrypt(event.content, nip44.v2.utils.getConversationKey(this.secret, this.walletPubkey))
+                : nip04.decrypt(this.secret, this.walletPubkey, event.content);
+              scheme = this.encryption === "nip04" ? "nip44" : "nip04";
+            } catch {
+              this.lastDecryptScheme = "none";
+              return; // counted already; the timeout diagnostic will report it
             }
+          }
+          this.lastDecryptScheme = scheme;
+          try {
+            const msg = JSON.parse(plain!);
             clearTimeout(timer);
             sub.close();
+            if (msg.error) {
+              reject(new NwcErrorReply(method, String(msg.error?.code ?? "unknown"),
+                String(msg.error?.message ?? JSON.stringify(msg.error))));
+              return;
+            }
             resolve(msg.result);
           } catch {
-            /* ignore undecryptable events */
+            // A decrypted but unparseable reply is still a protocol failure worth
+            // surfacing rather than swallowing.
+            clearTimeout(timer);
+            sub.close();
+            reject(new NwcErrorReply(method, "unparseable", String(plain).slice(0, 120)));
           }
         },
       });
