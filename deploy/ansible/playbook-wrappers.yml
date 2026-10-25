@@ -39,7 +39,7 @@
     # Pin the deployed source. A full SHA (or tag) makes every deploy
     # reproducible; "main" deploys whatever the branch points at that day.
     # Rollback = set this to the previous SHA and re-run.
-    cvm_kit_version: "c0fb36b8d8256215957ab611aa53313153fac18d" # NWC rail + wrappers; verified 2026-10-25
+    cvm_kit_version: "1cd227eded4d93cccb2883c9b899538d9e493180" # PR #24 merge: NWC double-pay guard; full SHA read from the GitHub API, 2026-10-25
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts
