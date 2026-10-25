@@ -28,7 +28,7 @@
     wrappers_secrets:
       cvm-sms4sats:
         NWC_URL: "{{ cvm_nwc_url }}"
-    sms_treasury_backend: "fake"
+    sms_treasury_backend: "nwc"
     sms_nwc_url: ""
     sms_cashu_treasury_mint_url: ""
     sms_cashu_seed: ""
@@ -39,7 +39,7 @@
     # Pin the deployed source. A full SHA (or tag) makes every deploy
     # reproducible; "main" deploys whatever the branch points at that day.
     # Rollback = set this to the previous SHA and re-run.
-    cvm_kit_version: "c2b1cbcb31c9549cff0665130a8c3ac5a2cd7cfa" # squash-merge SHA for PR #8; update deliberately for rollback/release changes
+    cvm_kit_version: "c0fb36b8d8256215957ab611aa53313153fac18d" # NWC rail + wrappers; verified 2026-10-25
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts
