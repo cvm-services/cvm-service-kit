@@ -85,8 +85,16 @@ export function describeNwcFailure(e: NwcTimeout, ctx: NwcAttemptContext): strin
       `${ctx.eventsSeen} reply event(s) arrived but are undecryptable — could not decrypt with either nip04 or nip44 — ` +
         `the wallet is replying with a scheme this client does not understand. This is NOT silence.`,
     );
-  } else {
+  } else if (ctx.decryptScheme === "nip04" || ctx.decryptScheme === "nip44") {
     parts.push(`${ctx.eventsSeen} reply event(s) seen (decrypted via ${ctx.decryptScheme}).`);
+  } else {
+    // A reply arrived but the caller never recorded which scheme opened it. Say
+    // only what is true — inventing "decrypted via undefined" would be the same
+    // class of dishonest diagnostic this module exists to eliminate.
+    parts.push(
+      `${ctx.eventsSeen} reply event(s) seen, but no decryption scheme was recorded — ` +
+        `the client could not tell which scheme opened the reply.`,
+    );
   }
 
   return parts.join(" ");
