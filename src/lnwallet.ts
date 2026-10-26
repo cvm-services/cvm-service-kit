@@ -12,6 +12,36 @@ export interface PaymentReceipt {
   feeSats?: number;
 }
 
+export type InvoiceState = "settled" | "pending" | "failed";
+
+export interface InvoiceStatus {
+  state: InvoiceState;
+  /** Present only when the rail proves settlement. */
+  preimage?: string;
+}
+
+/**
+ * Map an NWC `lookup_invoice` result onto our three states.
+ *
+ * Exported and pure because this mapping is where an "unknown" gets silently
+ * promoted to "paid": some servers nest the payload under `transaction`, others
+ * put it at the top level, and the state vocabulary differs per implementation.
+ * Anything unrecognised stays `pending` - never settled - so a caller cannot
+ * mistake a parsing surprise for money that arrived.
+ */
+export function mapLookupResult(result: unknown): InvoiceStatus {
+  const r = (result ?? {}) as Record<string, unknown>;
+  const tx = (r.transaction ?? r) as Record<string, unknown>;
+  const raw = String(tx.state ?? tx.status ?? "").toLowerCase();
+  const preimage = typeof tx.preimage === "string" && tx.preimage.trim() ? tx.preimage.trim() : undefined;
+
+  if (["paid", "settled", "complete", "completed", "succeeded"].includes(raw)) {
+    return preimage ? { state: "settled", preimage } : { state: "settled" };
+  }
+  if (["failed", "expired", "error"].includes(raw)) return { state: "failed" };
+  return { state: "pending" };
+}
+
 /** Minimal Lightning wallet the reseller treasury needs. */
 export interface LnWallet {
   /** Pay a BOLT11 invoice; returns the preimage (required for L402). */
@@ -20,12 +50,21 @@ export interface LnWallet {
   makeInvoice(sats: number, memo?: string): Promise<MintedInvoice>;
   /** Current spendable balance in sats. */
   balanceSats(): Promise<number>;
+  /**
+   * Ask the rail what became of an invoice. Never sends anything.
+   *
+   * Needed because a payment that times out returns no answer: without this the
+   * only options are "retry" (double-pay) or "give up" (lose the money).
+   */
+  lookupInvoice(bolt11: string): Promise<InvoiceStatus>;
 }
 
 export class FakeLnWallet implements LnWallet {
   balance: number;
   paid: string[] = [];
   minted: MintedInvoice[] = [];
+  /** bolt11 -> status, so lookup can answer without a network. */
+  statuses = new Map<string, InvoiceStatus>();
   private n = 0;
 
   constructor(balance = 1_000_000) {
@@ -39,7 +78,9 @@ export class FakeLnWallet implements LnWallet {
     }
     if (amount !== null) this.balance -= amount;
     this.paid.push(bolt11);
-    return { preimage: `preimage-${++this.n}` };
+    const preimage = `preimage-${++this.n}`;
+    this.statuses.set(bolt11, { state: "settled", preimage });
+    return { preimage };
   }
 
   async makeInvoice(sats: number, memo?: string): Promise<MintedInvoice> {
@@ -50,6 +91,10 @@ export class FakeLnWallet implements LnWallet {
 
   async balanceSats(): Promise<number> {
     return this.balance;
+  }
+
+  async lookupInvoice(bolt11: string): Promise<InvoiceStatus> {
+    return this.statuses.get(bolt11) ?? { state: "pending" };
   }
 }
 
@@ -225,5 +270,17 @@ export class NwcLnWallet implements LnWallet {
   async balanceSats(): Promise<number> {
     const result = await this.request("get_balance", {});
     return Math.floor((result.balance ?? 0) / 1000);
+  }
+
+  /**
+   * NIP-47 `lookup_invoice`, keyed by the invoice itself.
+   *
+   * Some wallets do not implement it. A failure here is NOT "not paid": the
+   * method throws, and the caller must treat that as unknown rather than
+   * inferring an outcome from an error.
+   */
+  async lookupInvoice(bolt11: string): Promise<InvoiceStatus> {
+    const result = await this.request("lookup_invoice", { invoice: bolt11 });
+    return mapLookupResult(result);
   }
 }
