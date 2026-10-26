@@ -6,7 +6,7 @@ import {
   type ProofState,
   Wallet,
 } from "@cashu/cashu-ts";
-import type { LnWallet, MintedInvoice, PaymentReceipt } from "./lnwallet.ts";
+import type { InvoiceStatus, LnWallet, MintedInvoice, PaymentReceipt } from "./lnwallet.ts";
 import { SqliteProofStore, type ProofStore, type StoredProof } from "./proof-store.ts";
 
 /**
@@ -200,4 +200,14 @@ export class CashuLnWallet implements LnWallet {
     this.creditMinted(proofs);
     return { proofs, balanceSats: this.store.sum() };
   }
+  /**
+   * A Cashu-backed wallet has no Lightning invoice-status surface of its own.
+   * Returning `pending` (rather than guessing) is the only safe answer: callers
+   * treat it as unknown and therefore refuse to retry a payment that may have
+   * gone through.
+   */
+  async lookupInvoice(_bolt11: string): Promise<InvoiceStatus> {
+    return { state: "pending" };
+  }
+
 }
