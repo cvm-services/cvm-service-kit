@@ -38,8 +38,9 @@
       CASHU_WALLET_SEED: "{{ sms_cashu_seed }}"
     # Pin the deployed source. A full SHA (or tag) makes every deploy
     # reproducible; "main" deploys whatever the branch points at that day.
-    # Rollback = set this to the previous SHA and re-run.
-    cvm_kit_version: "1cd227eded4d93cccb2883c9b899538d9e493180" # PR #24 merge: NWC double-pay guard; full SHA read from the GitHub API, 2026-10-25
+    # Rollback = set this to a previous reachable SHA and re-run. This pin is
+    # the current main head; advance it deliberately after each reviewed release.
+    cvm_kit_version: "c568283e1720f352c694d15f146e71375e4f323e" # reachable main SHA; do not use a rebased or PR-only SHA
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts
