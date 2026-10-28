@@ -9,7 +9,17 @@
 # and cannot drift; at a moving ref every deploy is whatever the ref points at
 # that day, which defeats reproducibility.
 cvm_kit_repo: "https://github.com/cvm-services/cvm-service-kit.git"
-cvm_kit_version: "c2b1cbcb31c9549cff0665130a8c3ac5a2cd7cfa" # squash-merge SHA for PR #8; update deliberately for rollback/release changes
+# The pin below is the reviewed main head (c568283, PR #27, 2026-10-27). It must
+# be a FULL 40-hex SHA that is an ancestor of main — one a fresh clone can check
+# out. ansible.builtin.git fetches refs only, so a commit no ref advertises
+# cannot be materialised: `git checkout` answers `fatal: reference is not a
+# tree` and the deploy runs nothing. That is how PR #8's pin died (3238513, a
+# pre-rebase commit orphaned by the rebase); PR #11 repinned it to the PR #8
+# squash merge (c2b1cbcb), which was reachable but 96 commits behind main, so
+# this pin advances to the reviewed head. Advance it deliberately after each
+# reviewed release; roles/cvm_service/tasks/main.yml refuses to deploy when the
+# SHA cannot be checked out or is not on main, naming the pin and the reason.
+cvm_kit_version: "c568283e1720f352c694d15f146e71375e4f323e"
 
 # Required per invocation:
 #   cvm_service_name   — e.g. cvm-nanogpt (also the systemd unit + /etc dir)

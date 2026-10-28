@@ -69,9 +69,82 @@
     version: "{{ cvm_kit_version }}"
     force: true
   register: cvm_checkout
+  # ignore_errors, NOT failed_when: false. `failed_when: false` rewrites the
+  # registered `failed` to False, so an assert on `.failed` can never fire
+  # (verified on ansible-core 2.21: a dead pin registers failed=false,
+  # after=undefined and the task reads plain `ok`). ignore_errors keeps the
+  # module's own verdict — failed=true, rc=128, stderr "reference is not a
+  # tree" — which the assert below turns into one message naming the pin.
   # `cvm_checkout.after` is the resolved commit of the checkout — the SHA the
   # services will run from. Debian 13 pitfall: no become_user here; become_user
   # + git triggers ACL errors. Clone as root, fix ownership below.
+  ignore_errors: true
+
+- name: Fail loudly when the pinned SHA cannot be checked out (review F2)
+  ansible.builtin.assert:
+    that:
+      # Keyed off the module's verdict, not `after == cvm_kit_version`: a tag
+      # or short SHA resolves to a full commit and is a legitimate pin (the
+      # documented rollback path), so equality would reject a good checkout.
+      - not (cvm_checkout.failed | default(false))
+      - cvm_checkout.after is defined
+    fail_msg: >-
+      cvm_kit_version '{{ cvm_kit_version }}' did not check out into
+      {{ cvm_service_repo_dir }}:
+      {{ (cvm_checkout.stderr | default('') | trim) or (cvm_checkout.msg | default('git failed without a message') | trim) }}
+      (rc={{ cvm_checkout.rc | default('n/a') }}). Nothing was deployed: the pin
+      never resolved to a commit. A pin no ref advertises cannot be fetched at
+      all — ansible.builtin.git fetches refs only, so a pre-rebase or PR-only
+      commit (the shape of PR #8's 3238513, orphaned by its rebase) dies here as
+      "reference is not a tree"; any other git failure dies here with its own
+      message. Re-pin cvm_kit_version to a SHA that is an ancestor of main, and
+      verify both probes first:
+      `git merge-base --is-ancestor <pin> origin/main` (rc=0) and
+      `git clone {{ cvm_kit_repo }} /tmp/pin-probe && git -C /tmp/pin-probe checkout <pin>`.
+    # success_msg is finalised even when the assert fails, so `after` must be
+    # defaulted here: on a dead pin ansible.builtin.git returns no `after` at
+    # all, and a bare {{ cvm_checkout.after }} raises during arg finalisation
+    # ("object of type 'dict' has no attribute 'after'") and masks fail_msg.
+    success_msg: "checked out pinned SHA {{ cvm_kit_version }} ({{ cvm_checkout.after | default('resolved') }})"
+  when: not ansible_check_mode
+
+- name: Resolve the main head the pin must descend from
+  ansible.builtin.command:
+    cmd: "git -C {{ cvm_service_repo_dir }} rev-parse --verify origin/main"
+  register: cvm_main_sha
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Is the pinned SHA an ancestor of main?
+  ansible.builtin.command:
+    cmd: "git -C {{ cvm_service_repo_dir }} merge-base --is-ancestor {{ cvm_kit_version }} origin/main"
+  register: cvm_pin_on_main
+  changed_when: false
+  failed_when: false
+  # rc=0 ancestor, rc=1 not an ancestor, rc=128 git could not answer (the pin's
+  # objects are absent, or the remote-tracking ref is missing). Any non-zero rc
+  # is a refusal: rc=1 proves the pin is off-main, anything else proves the pin
+  # cannot be verified at all — the assert below distinguishes the two so the
+  # operator is not sent hunting the wrong problem.
+  when: not ansible_check_mode
+
+- name: Fail loudly when the pinned SHA is not on main (review F2)
+  ansible.builtin.assert:
+    that:
+      - cvm_main_sha.rc | default(1) == 0
+      - cvm_pin_on_main.rc | default(1) == 0
+    fail_msg: >-
+      cvm_kit_version '{{ cvm_kit_version }}' cannot be verified against
+      origin/main (main head: {{ cvm_main_sha.stdout | default('(unresolved)') | trim }},
+      merge-base rc={{ cvm_pin_on_main.rc | default('n/a') }}). rc=1 means the pin
+      is present but main never merged it (a PR head or side-branch commit): pin
+      the SHA main actually reviewed. Any other non-zero rc means the ancestry
+      could not be evaluated at all (origin/main unresolved, or the pin's objects
+      absent from the checkout), so the pin cannot be vouched for; refusing to
+      deploy an unverifiable ref.
+    success_msg: "pinned SHA {{ cvm_kit_version }} is on main ({{ cvm_main_sha.stdout | default('') | trim }})"
+  when: not ansible_check_mode
 
 - name: Read back the deployed commit (independent verify)
   ansible.builtin.command:

@@ -28,9 +28,13 @@ rollback; "what is running?" was only answerable by SSH archaeology.
 
 - `cvm_kit_version: <full SHA>` (or tag) — the reproducible setting: the
   checkout is exactly that commit, and re-running the playbook is idempotent.
-- Both the role default and the playbook pin a **full SHA** (never a moving
-  ref). After this PR merges, re-pin to the merge SHA; until then the pin is
-  the PR branch head, which contains the health commit/ref wiring.
+- Both the role default and the playbook pin the **same full SHA**, and that
+  SHA must be an **ancestor of main**. `ansible.builtin.git` fetches refs only,
+  so a rebased or PR-only SHA that no ref advertises cannot be checked out —
+  the deploy dies at the checkout step with `fatal: reference is not a tree`
+  (exactly what PR #8's `3238513` pin did). The role asserts both properties: a
+  pin that cannot be checked out, or that is not on main, fails loudly naming
+  the pin.
 - **Rollback is one variable change**: set `cvm_kit_version` to the previous
   SHA (or tag) and re-run the playbook. The checkout resets (`force: true`),
   the unit restarts, and the health endpoint reports the old commit.
@@ -44,6 +48,17 @@ curl -s 127.0.0.1:8781/health | jq -r .commit   # cvm-sms4sats on vps2
 ```
 
 (CVM_COMMIT / CVM_REF env vars override the marker files, e.g. for local dev.)
+
+### Advancing the pin
+
+Prove both properties before committing a new `cvm_kit_version`:
+
+```bash
+PIN=<new-sha>
+git merge-base --is-ancestor "$PIN" origin/main     # rc=0 required
+git clone https://github.com/cvm-services/cvm-service-kit.git /tmp/pin-probe
+git -C /tmp/pin-probe checkout "$PIN"               # must succeed
+```
 
 ## Per-service config
 
