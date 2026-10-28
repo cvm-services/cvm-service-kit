@@ -1259,3 +1259,95 @@ defaults comment with its own rationale and independently switched `failed_when:
 `ignore_errors` while I was verifying). I reconciled by adopting its two genuinely better points
 and fixing the `success_msg` crash it introduced, then committed `d471b55`. Expect the same
 collision if this card is dispatched twice; the duplicate should be dropped, not merged twice.
+
+---
+
+# Re-pin pass 2 (2026-10-28, offload worker, node t440): published and merged
+
+**Status: DONE and LANDED.** PR **#28** squash-merged to `main` as
+**`52e239fbebdc81818cd7d56c2e82b0d88115da92`**.
+PR: https://github.com/cvm-services/cvm-service-kit/pull/28
+Review follow-up on PR #8: https://github.com/cvm-services/cvm-service-kit/pull/8#issuecomment-6477353042
+Verification comment at the merged head: https://github.com/cvm-services/cvm-service-kit/pull/28#issuecomment-6477285793
+
+## Arrival state
+
+The code was already complete at `d3e45f9` (commits `9c00514`, `fe1578e`, `d471b55`, `d904adf`,
+`d3e45f9`) and **PR #28 was already open** at that exact head — opened 18:16Z by the duplicate
+worker this checkout shares, which is what actually cleared the previous pass's "cannot publish"
+blocker. What was genuinely open in this pass was: an independent re-verification, a review
+follow-up on PR #8, and the merge.
+
+## The publish path (this is the reusable finding)
+
+The previous pass reported publishing impossible and that is **true of t440 itself**: no
+`GITHUB_TOKEN`/`GH_TOKEN`, no `~/.netrc`, no credential helper, no `gh` CLI, and
+`ssh -T git@github.com` → `Permission denied (publickey)`; `git push --dry-run github` →
+`could not read Username for 'https://github.com'`. The `origin` remote is nostr, and the nostr
+helper (`git-remote-nostr`) is not installed here.
+
+It is **not** true of the fleet. `~/.ssh/config` carries one alias per node under the `.fips`
+mesh with `id_fleet`, and **`cobrador` has `gh` authenticated as `felixfelix-bot`**
+(`gh auth status` → logged in, active account). A bundle → `scp` → throwaway-clone →
+`gh pr create` round trip from cobrador works with the host's own clone untouched. A
+credential-helper one-liner (`!f() { echo username=x-access-token; echo "password=$(gh auth token)"; }`)
+keeps the token out of argv and out of any file.
+
+Pitfall measured, worth knowing: **cloning a single-branch git bundle leaves HEAD unborn**
+(`warning: remote HEAD refers to nonexistent ref`), so `git push … HEAD:refs/heads/<branch>`
+dies with `error: src refspec HEAD does not match any`. Push by branch name instead
+(`refs/heads/fix/repin-cvm-kit-version:refs/heads/pr/<slug>`).
+
+## Verification performed here (not inherited from the earlier report)
+
+- `git merge-base --is-ancestor c568283e… github/main` → **rc=0**
+- fresh `git clone` + `git checkout c568283e…` → **rc=0**, `HEAD=c568283e1720f352c694d15f146e71375e4f323e`
+- control on the same clone: `checkout 3238513…` → `fatal: reference is not a tree`, **rc=128**;
+  `checkout c2b1cbcb…` → rc=0. The probe has teeth.
+- **The role's pin tasks were executed**, lifted verbatim (`git show HEAD:… | sed -n '65,147p'`)
+  into a localhost play, ansible-core 2.21.5, four cases:
+
+| case | pin | measured |
+|---|---|---|
+| good | `c568283e…` | `ok=6 changed=1 failed=0` |
+| short SHA | `c568283` | `ok=6 changed=1 failed=0` |
+| orphan | `3238513…` | `failed=1` rc=2, "…did not check out …: fatal: reference is not a tree … (rc=128)" |
+| off-main | `7d124c3…` (`pr/pinned-deploy`) | `failed=1` rc=2, "cannot be verified against origin/main (main head: c568283e…, merge-base rc=1)" |
+
+- `ansible-playbook --syntax-check playbook-wrappers.yml` → clean; both pins 40-hex and equal;
+  `git diff --check` clean; `git grep -nE 'cvm_kit_version:.*3238513' -- deploy/` → no hits.
+- **Post-merge, on `main` `52e239f`**: fresh clone → `checkout c568283e…` rc=0; both pin sites read
+  `c568283e1720f352c694d15f146e71375e4f323e` from `git show 52e239f:…`; the F2 guard tasks are
+  present on main (`grep -cE 'is-ancestor|ignore_errors'` → 5).
+
+## CI on the merged head: red, and proven inherited (with one correction)
+
+PR #28's `deno` job passed and its `bun` job failed. The failure is **not** this diff: `main` at
+`c568283` already fails the same job. Correction worth recording, because the earlier PR comment
+cited the wrong run: the run for **main** `c568283` is **40381338774**
+(`conclusion=failure`, jobs `deno` success / `bun` failure), *not* 40743642847 (which is PR #28's
+own run). The `bun` log shows
+`services/cvm-sms4sats/src/wallet.test.ts(36,33) TS2345` and `(40,5) TS2322` — that test's fake
+wallet never gained `lookupInvoice` after #27 added it to `LnWallet`. Deploy-only diff
+(`git diff --name-only` → 5 files, no `.ts`), so merging turned nothing red that was green.
+
+That red job is a real, separate defect on main and is **left for its own focused PR** rather than
+smuggled into the pin change. The rollout card `t_b4643299` will still see `bun` red after this
+lands; it does not affect the deploy, which is the checkout + the wrapper services.
+
+## What this pass changed in the repo
+
+Nothing in the deploy files — they landed as reviewed. This section only.
+
+## Not done / not verified
+
+- **No fleet target was converged.** The role's pin tasks ran on localhost; the rollout card must
+  still deploy and read `/health`'s `commit`/`ref` **from the node**. Gate 6 for IaC is not
+  satisfied by this pass either.
+- No formal cross-family review verdict was obtained on PR #28; what was published is an
+  independent verification comment, and the merge was made on measured evidence plus the
+  branch's own report. Stated plainly because the fleet gate `cold_cross_family_review` wants a
+  verdict, not a verification comment.
+- `main`'s `bun` job is red (inherited) — see above.
+- The duplicate worker on this card should be dropped, not merged twice; its PR and this pass
+  converged on the same head `d3e45f9`.
