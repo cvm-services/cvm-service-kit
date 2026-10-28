@@ -36,11 +36,15 @@
       NWC_URL: "{{ sms_nwc_url }}"
       CASHU_TREASURY_MINT_URL: "{{ sms_cashu_treasury_mint_url }}"
       CASHU_WALLET_SEED: "{{ sms_cashu_seed }}"
-    # Pin the deployed source. A full SHA (or tag) makes every deploy
+    # Pin the deployed source. A full 40-hex SHA makes every deploy
     # reproducible; "main" deploys whatever the branch points at that day.
-    # Rollback = set this to a previous reachable SHA and re-run. This pin is
-    # the current main head; advance it deliberately after each reviewed release.
-    cvm_kit_version: "c568283e1720f352c694d15f146e71375e4f323e" # reachable main SHA; do not use a rebased or PR-only SHA
+    # Rollback = set this to a previous reachable SHA and re-run.
+    # c568283 = reviewed main head (PR #27) and must stay in lockstep with
+    # roles/cvm_service/defaults/main.yml. Never pin a squash orphan or a
+    # PR-head/rebase SHA: no ref carries it, so the module's
+    # `git checkout --force <pin>` dies with "reference is not a tree" and the
+    # deploy never runs the pin.
+    cvm_kit_version: "c568283e1720f352c694d15f146e71375e4f323e"
     wrappers:
       - name: cvm-sms4sats
         script: services/cvm-sms4sats/src/server.ts
