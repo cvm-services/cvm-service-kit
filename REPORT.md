@@ -1074,3 +1074,171 @@ rather than fixed in this head so that the APPROVED verdict attaches to the exac
    the merge is no longer blocked on review.
 2. The `GATE_DB` IaC line needs a converge + a read-back **from a node** by someone with fleet
    credentials — out of scope for an unprivileged worker on this host.
+
+---
+
+# Re-pin `cvm_kit_version` (PR #8 review F1/F2/F3) — offload worker, node t440
+
+Branch `fix/repin-cvm-kit-version`, commits `9c00514`, `fe1578e`, `d471b55`.
+**Status: code complete and verified; NOT published.** No GitHub credential exists on this node,
+so the PR could not be opened and the review follow-up could not be posted. See "Blocker".
+
+## The card's premise does not reproduce on current main — measured
+
+The card says both pin sites carry the pre-rebase orphan `3238513` and that every fresh deploy from
+current main fails at checkout. Half of that is confirmed, half is stale:
+
+- **Confirmed:** `3238513` is an orphan. A fresh clone cannot check it out —
+  `git checkout 323851345422d385070327241b9ef6ad08fd0bf3` → rc=128
+  `fatal: reference is not a tree`. `ansible.builtin.git` clones the default branch and then runs
+  `git checkout --force <pin>`, so it dies on the same thing (measured: rc=128, no `after`).
+- **Stale:** main no longer pins it. `7958fff fix(deploy): repin cvm kit to merged release (#11)`
+  moved BOTH sites to `c2b1cbcb` (the PR #8 squash merge); `d2e57c5` then moved the playbook pin to
+  `c0fb36b8` and `1ac61ea` to `1cd227e`. On main `c568283` the live pins were
+  `1cd227e` (playbook) and `c2b1cbcb` (defaults) — both reachable ancestors, both checkout cleanly.
+
+So the residual defect is **drift, not a dead pin**:
+
+| site | old pin | distance behind main | diff |
+|---|---|---|---|
+| `deploy/ansible/playbook-wrappers.yml:43` | `1cd227e` | 4 commits | 4 files, +116/−4 |
+| `deploy/ansible/roles/cvm_service/defaults/main.yml` | `c2b1cbcb` | 96 commits | 127 files, +20177/−253 |
+
+The role default (the pin that applies to any wrapper without a playbook override) deployed a
+96-commit-old tree, and the two sites disagreed with each other — so ".deployed-ref" told you a
+different story depending on which file you believed.
+
+## Pin chosen: `c568283e1720f352c694d15f146e71375e4f323e`
+
+That is `refs/heads/main` at the time of work (the PR #27 merge; `ls-remote` shows it as both HEAD
+and `refs/heads/main`). **The card's suggested `c2b1cbcb` was rejected**: it is reachable and
+checkoutable, but it is 96 commits behind main and predates the NWC guard repairs (#24), the #25 pin
+and #27's `lookupInvoice` — pinning it would have made the "fix" deploy older code than main.
+
+Both sites now carry the same SHA, and the comments/README state the invariant (full 40-hex, an
+ancestor of main, proven by two probes) instead of the stale "flip-pin until merged" text.
+
+## What changed
+
+- `deploy/ansible/playbook-wrappers.yml` — pin → `c568283`, comment rewritten: no rebase/PR-head
+  SHA, and the concrete failure mode (`git checkout --force <pin>` → "reference is not a tree").
+- `deploy/ansible/roles/cvm_service/defaults/main.yml` — pin → `c568283`, comment records the
+  history: PR #8's orphan, PR #11's repin to `c2b1cbcb`, and why the pin now advances to the
+  reviewed head.
+- `deploy/ansible/roles/cvm_service/tasks/main.yml` — F2 hardening, 4 new tasks:
+  1. checkout task gains `ignore_errors: true` (NOT `failed_when: false` — that rewrites the
+     registered `failed` to False and makes any assert on it dead code; verified).
+  2. assert on the module's own verdict + `after is defined`; on a dead pin it prints one message
+     naming the pin, the dest, rc=128 and git's `stderr`, plus both remediation probes. Keying on
+     `after == cvm_kit_version` was rejected: a tag or short SHA resolves to a full commit, so the
+     pin string and `after` legitimately differ (documented rollback path).
+  3. resolve `origin/main`, run `merge-base --is-ancestor <pin> origin/main`, and assert rc=0 —
+     so a pin main never merged (a PR head) also fails loudly, naming the pin AND the main head.
+  4. the two rc cases are distinguished in the message (rc=1 = off-main; other = unverifiable).
+- `deploy/ansible/README.md` — the stale "After this PR merges, re-pin to the merge SHA" bullet is
+  replaced with the invariant + a new "Advancing the pin" block carrying the two probes.
+
+## Evidence (all commands run on this node)
+
+Pin reachability, both required probes:
+
+```
+$ git merge-base --is-ancestor c568283e1720f352c694d15f146e71375e4f323e github/main
+ancestor rc=0
+
+$ git clone https://github.com/cvm-services/cvm-service-kit.git $D && git -C $D checkout c568283e...
+HEAD is now at c568283 Merge pull request #27 from cvm-services/pr/nwc-lookup-v2
+clone+checkout rc=0 ; git -C $D rev-parse HEAD -> c568283e1720f352c694d15f146e71375e4f323e
+```
+
+The control that proves the probe has teeth (same fresh-clone method):
+
+```
+$ git -C $D checkout 323851345422d385070327241b9ef6ad08fd0bf3
+fatal: reference is not a tree: 323851345422d385070327241b9ef6ad08fd0bf3   rc=128
+$ git -C $D checkout c2b1cbcb31c9549cff0665130a8c3ac5a2cd7cfa   rc=0
+$ git -C $D checkout 1cd227eded4d93cccb2883c9b899538d9e493180   rc=0
+```
+
+The role's new tasks were EXECUTED, not eyeballed: a harness lifted the five pin/checkout tasks
+verbatim out of `tasks/main.yml` (no copies) into a localhost play and ran them under
+ansible-core 2.21.5:
+
+| case | pin | result |
+|---|---|---|
+| good | `c568283e` | rc=0, `ok=5`, "checked out pinned SHA … (c568283e…)", "is on main (c568283e…)" |
+| short SHA | `c568283` | rc=0 — regression case for the tag-class false positive |
+| orphan | `3238513` | rc=2 — "did not check out into …: fatal: reference is not a tree: 3238513… (rc=128)" |
+| off-main | `cec5334` (pr/real-wallet head) | rc=2 — "cannot be verified against origin/main (main head: c568283…, merge-base rc=1). rc=1 means the pin is present but main never merged it" |
+
+Static gates: YAML parses for all three files; both pins equal and 40-hex;
+`ansible-playbook --syntax-check playbook-wrappers.yml` → `playbook: playbook-wrappers.yml` (no
+errors); `git diff --check` clean; `git grep -nE 'cvm_kit_version:[^\n]*3238513' -- deploy/` → no
+hits (the orphan survives only as history in comments).
+
+Three executions found real bugs in my own first cut — this is why they were run:
+`failed_when: false` made the first assert dead code; `after == cvm_kit_version` would have rejected
+every tag/short-SHA pin; and a bare `{{ cvm_checkout.after }}` in `success_msg` (finalised even on
+the failing path) raised `object of type 'dict' has no attribute 'after'` and masked the message.
+
+## Blocker — this node cannot publish
+
+- `git push github …` → rc=128 `fatal: could not read Username for 'https://github.com': No such
+  device or address`. No `GITHUB_TOKEN`/`GH_TOKEN`, no `~/.netrc`, no credential helper, no `gh`
+  CLI, and `ssh -T git@github.com` → `Permission denied (publickey)`.
+- `git push origin …` → rc=128 `git: 'remote-nostr' is not a git command` (the nostr helper is not
+  installed here; `origin` is a nostr remote, `github` is the https one).
+
+So: **no branch pushed, no PR, no review follow-up comment, nothing merged.** The rollout card
+`t_b4643299` is still blocked on the ordering constraint.
+
+Apply-ready handoff (created from the committed tree):
+
+- `~/reports/cvm-kit-repin/repin-cvm-kit-version.bundle` (725 KB, verified: "records a complete
+  history", tip `d471b55`)
+- `~/reports/cvm-kit-repin/repin-3-commits.patch` (all three commits)
+- `~/reports/cvm-kit-repin/repin-my-2-commits.patch` (my two commits only)
+
+One-line finish, from a node with GitHub credentials:
+
+```bash
+git fetch ~/reports/cvm-kit-repin/repin-cvm-kit-version.bundle \
+  fix/repin-cvm-kit-version:fix/repin-cvm-kit-version
+git push github fix/repin-cvm-kit-version:refs/heads/pr/repin-cvm-kit-version   # pr/ prefix: pre-push hook
+# then open the PR against main and post the review follow-up on
+# https://github.com/cvm-services/cvm-service-kit/pull/8#pullrequestreview-5464351322
+```
+
+Suggested follow-up comment body (for PR #8 review F1/F2/F3):
+
+> Re-pin landed as a small PR: both `cvm_kit_version` sites now pin `c568283` (the reviewed main
+> head, PR #27) and the role asserts the pin is checkoutable and an ancestor of `origin/main`,
+> failing with a message that names the pin, what git was left on, and both remediation probes.
+> Correcting the review's premise on one point: on current main the orphan `3238513` was no longer
+> at either site — PR #11 had repinned both to `c2b1cbcb`. The live defect was drift: the role
+> default pinned a tree 96 commits behind main (127 files), and the two sites disagreed. `c2b1cbcb`
+> was therefore not used as the new pin. Probes: `merge-base --is-ancestor c568283 origin/main`
+> rc=0, and a fresh clone + `checkout c568283` succeeds, while the same probe on `3238513` returns
+> `fatal: reference is not a tree` (rc=128). The role's new asserts were executed against
+> localhost under ansible-core 2.21.5 for a good pin, a short SHA, the orphan, and an off-main PR
+> head.
+
+## Not done / not verified
+
+- Not merged, no PR, no published review follow-up (blocker above).
+- Nothing was converged against a real fleet target. Gate 6 for IaC cards wants a real-target run
+  and a read-back FROM the node; this work exercised the role's pin tasks on localhost only, so it
+  is not a substitute for the rollout card `t_b4643299`, which must still deploy and read back
+  `/health`'s `commit`/`ref` on the target.
+- Deliberately not enforced: a moving ref (`main`) and a tag still pass both asserts. Tags are a
+  documented rollback path and the ancestry check still bounds what may be pinned; only the docs
+  forbid a moving ref. Forbidding it outright was left as a separate decision.
+
+## Operational warning
+
+A second worker was editing the SAME four files in this checkout concurrently (it rewrote the
+defaults comment with its own rationale and independently switched `failed_when: false` →
+`ignore_errors` while I was verifying). I reconciled by adopting its two genuinely better points
+and fixing the `success_msg` crash it introduced, then committed `d471b55`. Expect the same
+collision if this card is dispatched twice; the duplicate should be dropped, not merged twice.
+
