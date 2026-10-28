@@ -1079,7 +1079,9 @@ rather than fixed in this head so that the APPROVED verdict attaches to the exac
 
 # Re-pin `cvm_kit_version` (PR #8 review F1/F2/F3) — offload worker, node t440
 
-Branch `fix/repin-cvm-kit-version`, commits `9c00514`, `fe1578e`, `d471b55`.
+Branch `fix/repin-cvm-kit-version`, commits `9c00514`, `fe1578e`, `d471b55`, `d904adf`, plus the docs
+commit that corrects this section (the tip is recorded in the handoff bundle rather than pinned in
+prose, because it moves every time this file is amended).
 **Status: code complete and verified; NOT published.** No GitHub credential exists on this node,
 so the PR could not be opened and the review follow-up could not be posted. See "Blocker".
 
@@ -1181,6 +1183,16 @@ Three executions found real bugs in my own first cut — this is why they were r
 every tag/short-SHA pin; and a bare `{{ cvm_checkout.after }}` in `success_msg` (finalised even on
 the failing path) raised `object of type 'dict' has no attribute 'after'` and masked the message.
 
+Independently re-executed by the duplicate worker on this card against the final committed text
+(same harness, ansible-core 2.21.5, four cases): good pin `c568283e` → `ok=5`, both asserts green;
+short SHA `c568283` → green, resolving to `c568283e`; orphan `3238513` → rc=2 with one message
+naming the pin, `fatal: reference is not a tree`, rc=128; off-main `7d124c3` (`pr/pinned-deploy`,
+advertised by a ref but never merged) → rc=2, "cannot be verified against origin/main (main head:
+c568283e…, merge-base rc=1)". `ansible-playbook --syntax-check deploy/ansible/playbook-wrappers.yml`
+is clean after the change, and the fetched `origin/main` used for the ancestry probe is `c568283`,
+the real remote head — the checkout's local `origin/main` had been stale at `0dc9b716`, which is what
+made an earlier measurement of the playbook pin disagree with the remote.
+
 ## Blocker — this node cannot publish
 
 - `git push github …` → rc=128 `fatal: could not read Username for 'https://github.com': No such
@@ -1192,19 +1204,25 @@ the failing path) raised `object of type 'dict' has no attribute 'after'` and ma
 So: **no branch pushed, no PR, no review follow-up comment, nothing merged.** The rollout card
 `t_b4643299` is still blocked on the ordering constraint.
 
-Apply-ready handoff (created from the committed tree):
+Apply-ready handoff (generated from the committed tree, re-verified after the last commit):
 
-- `~/reports/cvm-kit-repin/repin-cvm-kit-version.bundle` (725 KB, verified: "records a complete
-  history", tip `d471b55`)
-- `~/reports/cvm-kit-repin/repin-3-commits.patch` (all three commits)
-- `~/reports/cvm-kit-repin/repin-my-2-commits.patch` (my two commits only)
+- `~/reports/cvm-kit-repin/repin-cvm-kit-version.bundle` — `git bundle verify` answers "records a
+  complete history"; its ref tip is this branch's HEAD (whatever `git rev-parse HEAD` says at
+  handoff — not restated here, because it moves with every docs commit).
+- `~/reports/cvm-kit-repin/repin-series.patch` — every commit ahead of `main`; verified with
+  `git apply --check` in a throwaway worktree at `main` `c568283`, which then shows both pins at
+  `c568283e…` and the guard's `ignore_errors: true` present.
+- Superseded drafts (`repin-3-commits.patch`, `repin-4-commits.patch`, `repin-my-2-commits.patch`,
+  `0001-*.patch`) are older snapshots of the same change; use the two above.
 
 One-line finish, from a node with GitHub credentials:
 
 ```bash
 git fetch ~/reports/cvm-kit-repin/repin-cvm-kit-version.bundle \
   fix/repin-cvm-kit-version:fix/repin-cvm-kit-version
-git push github fix/repin-cvm-kit-version:refs/heads/pr/repin-cvm-kit-version   # pr/ prefix: pre-push hook
+git push github fix/repin-cvm-kit-version:refs/heads/pr/repin-cvm-kit-version
+# pr/<slug> is the repo's own branch convention (every refs/heads/pr/* here), not a hook rule:
+# the fleet pre-push hook is a credential-leak gate with no branch-name policy.
 # then open the PR against main and post the review follow-up on
 # https://github.com/cvm-services/cvm-service-kit/pull/8#pullrequestreview-5464351322
 ```
@@ -1241,4 +1259,3 @@ defaults comment with its own rationale and independently switched `failed_when:
 `ignore_errors` while I was verifying). I reconciled by adopting its two genuinely better points
 and fixing the `success_msg` crash it introduced, then committed `d471b55`. Expect the same
 collision if this card is dispatched twice; the duplicate should be dropped, not merged twice.
-
