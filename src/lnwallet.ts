@@ -212,14 +212,14 @@ export class NwcLnWallet implements LnWallet {
           // different scheme is still answering.
           try {
             plain = this.encryption === "nip04"
-              ? nip04.decrypt(this.secret, this.walletPubkey, event.content)
+              ? await nip04.decrypt(this.secret, this.walletPubkey, event.content)
               : nip44.v2.decrypt(event.content, nip44.v2.utils.getConversationKey(this.secret, this.walletPubkey));
             scheme = this.encryption;
           } catch {
             try {
               plain = this.encryption === "nip04"
                 ? nip44.v2.decrypt(event.content, nip44.v2.utils.getConversationKey(this.secret, this.walletPubkey))
-                : nip04.decrypt(this.secret, this.walletPubkey, event.content);
+                : await nip04.decrypt(this.secret, this.walletPubkey, event.content);
               scheme = this.encryption === "nip04" ? "nip44" : "nip04";
             } catch {
               this.lastDecryptScheme = "none";
