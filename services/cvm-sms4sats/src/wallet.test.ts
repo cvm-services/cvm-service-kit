@@ -58,6 +58,9 @@ function fakeWallet(balance: number) {
     async balanceSats() {
       return balance;
     },
+    async lookupInvoice() {
+      return { state: "pending" as const };
+    },
   };
 }
 
