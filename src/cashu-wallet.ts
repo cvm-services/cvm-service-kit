@@ -53,6 +53,12 @@ export interface CashuLnWalletConfig {
   /** 32/64-byte seed (Uint8Array) for deterministic secrets. Required in prod. */
   seed: Uint8Array;
   dbPath: string;
+  /**
+   * Persistent NUT-13 counter source. Without it cashu-ts uses an EPHEMERAL
+   * counter starting at 0, so a restarted process reuses outputs the mint has
+   * already signed and every mint fails with "outputs already signed".
+   */
+  counterSource?: unknown;
 }
 
 /**
@@ -83,7 +89,13 @@ export class CashuLnWallet implements LnWallet {
     this.store = deps.store ?? new SqliteProofStore(cfg.dbPath);
     this.wallet =
       deps.wallet ??
-      (new Wallet(cfg.mintUrl, { unit: "sat", bip39seed: cfg.seed }) as unknown as CashuTreasuryWalletLike);
+      (new Wallet(cfg.mintUrl, {
+        unit: "sat",
+        bip39seed: cfg.seed,
+        ...(cfg.counterSource
+          ? { counterSource: cfg.counterSource as never }
+          : {}),
+      }) as unknown as CashuTreasuryWalletLike);
   }
 
   private async ensureLoaded(): Promise<void> {
